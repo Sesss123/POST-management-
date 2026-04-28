@@ -13,6 +13,8 @@ import {
   User,
   CreditCard
 } from 'lucide-react';
+import { AppButton, AppModal } from '../components/ui';
+import InvoicePrintModal from '../components/invoice/InvoicePrintModal';
 import { cn } from '../utils/cn';
 
 const InvoiceDetailsPage = () => {
@@ -20,6 +22,7 @@ const InvoiceDetailsPage = () => {
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showPrintModal, setShowPrintModal] = useState(false);
 
   useEffect(() => {
     fetchInvoice();
@@ -37,7 +40,7 @@ const InvoiceDetailsPage = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    setShowPrintModal(true);
   };
 
   if (loading) return <div>Loading invoice details...</div>;
@@ -80,9 +83,8 @@ const InvoiceDetailsPage = () => {
                         <h1 className="text-3xl font-black tracking-tight">RestoLedger</h1>
                     </div>
                     <div className="space-y-1 text-slate-400 text-sm font-medium">
-                        <p>123 Restaurant Street, Colombo 03</p>
-                        <p>Tel: +94 11 234 5678</p>
-                        <p>Email: hello@restoledger.com</p>
+                        <p>{invoice.settings?.restaurant_address || '123 Restaurant Street, Colombo'}</p>
+                        <p>Tel: {invoice.settings?.restaurant_phone || '+94 11 234 5678'}</p>
                     </div>
                 </div>
                 <div className="text-right">
@@ -163,15 +165,29 @@ const InvoiceDetailsPage = () => {
                 <div className="w-full max-w-xs space-y-3">
                     <div className="flex justify-between text-slate-500 font-medium">
                         <span>Subtotal</span>
-                        <span>Rs. {parseFloat(invoice.subtotal).toLocaleString()}</span>
+                        <span>{invoice.settings?.currency_symbol || 'Rs.'} {parseFloat(invoice.subtotal).toLocaleString()}</span>
                     </div>
-                    <div className="flex justify-between text-slate-500 font-medium">
-                        <span>Discount</span>
-                        <span className="text-rose-500">- Rs. {parseFloat(invoice.discount).toLocaleString()}</span>
-                    </div>
+                    {parseFloat(invoice.discount) > 0 && (
+                        <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Discount</span>
+                            <span className="text-rose-500">- {invoice.settings?.currency_symbol || 'Rs.'} {parseFloat(invoice.discount).toLocaleString()}</span>
+                        </div>
+                    )}
+                    {parseFloat(invoice.tax_amount) > 0 && (
+                        <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Tax ({invoice.tax_rate}%)</span>
+                            <span>{invoice.settings?.currency_symbol || 'Rs.'} {parseFloat(invoice.tax_amount).toLocaleString()}</span>
+                        </div>
+                    )}
+                    {parseFloat(invoice.service_charge_amount) > 0 && (
+                        <div className="flex justify-between text-slate-500 font-medium">
+                            <span>Service Charge ({invoice.service_charge_rate}%)</span>
+                            <span>{invoice.settings?.currency_symbol || 'Rs.'} {parseFloat(invoice.service_charge_amount).toLocaleString()}</span>
+                        </div>
+                    )}
                     <div className="flex justify-between items-center py-4 border-t-2 border-slate-900">
                         <span className="text-lg font-black text-slate-900 uppercase tracking-tight">Total Paid</span>
-                        <span className="text-3xl font-black text-indigo-600">Rs. {parseFloat(invoice.grand_total).toLocaleString()}</span>
+                        <span className="text-3xl font-black text-indigo-600">{invoice.settings?.currency_symbol || 'Rs.'} {parseFloat(invoice.grand_total).toLocaleString()}</span>
                     </div>
                 </div>
             </div>
@@ -179,67 +195,15 @@ const InvoiceDetailsPage = () => {
 
         {/* Footer */}
         <div className="p-12 bg-slate-50 border-t border-slate-100 text-center">
-            <h4 className="font-bold text-slate-900 mb-2">Thank you for your business!</h4>
-            <p className="text-xs text-slate-400 font-medium">This is a computer-generated invoice from RestoLedger POS.</p>
+            <h4 className="font-bold text-slate-900 mb-2">{invoice.settings?.receipt_footer_message || 'Thank you for your business!'}</h4>
+            <p className="text-xs text-slate-400 font-medium">Powered by RestoLedger POS</p>
         </div>
       </div>
-      
-      {/* Thermal Print Hidden Version */}
-      <div className="print-only thermal-receipt font-mono text-[10px] w-[80mm] p-2 leading-tight">
-          <div className="text-center mb-2">
-              <h1 className="font-bold uppercase text-sm">RestoLedger</h1>
-              <p>123 Restaurant St, Colombo</p>
-              <p>+94 11 234 5678</p>
-          </div>
-          <div className="border-t border-dashed my-1"></div>
-          <div className="flex justify-between">
-              <span>INV: {invoice.invoice_no}</span>
-              <span>{new Date(invoice.created_at).toLocaleDateString()}</span>
-          </div>
-          <div className="border-t border-dashed my-1"></div>
-          <table className="w-full text-left">
-              <thead>
-                  <tr>
-                      <th className="font-normal">ITEM</th>
-                      <th className="text-center font-normal">QTY</th>
-                      <th className="text-right font-normal">AMT</th>
-                  </tr>
-              </thead>
-              <tbody>
-                  {invoice.items.map(item => (
-                      <tr key={item.id}>
-                          <td>{item.item_name}</td>
-                          <td className="text-center">{item.qty}</td>
-                          <td className="text-right">{item.total}</td>
-                      </tr>
-                  ))}
-              </tbody>
-          </table>
-          <div className="border-t border-dashed my-1"></div>
-          <div className="flex justify-between font-bold">
-              <span>TOTAL</span>
-              <span>RS. {invoice.grand_total}</span>
-          </div>
-          <div className="text-center mt-4 italic">
-              <p>Thank You!</p>
-              <p>Powered by RestoLedger</p>
-          </div>
-      </div>
-
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; margin: 0; padding: 0; }
-            #invoice-render { 
-                box-shadow: none !important; 
-                border: 1px solid #eee !important;
-                display: block !important;
-            }
-            .thermal-receipt { display: none !important; } /* Default print to A4 style */
-        }
-        
-        /* If user wants thermal specific print, we can toggle classes or use another media query */
-      ` }} />
+      <InvoicePrintModal 
+        isOpen={showPrintModal} 
+        onClose={() => setShowPrintModal(false)} 
+        invoice={invoice} 
+      />
     </div>
   );
 };

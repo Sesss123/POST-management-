@@ -24,8 +24,11 @@ INSERT INTO users (name, email, password, role) VALUES
 
 INSERT INTO users (name, email, password, role) VALUES 
 ('Admin User', 'admin@restopos.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'),
-('Cashier User', 'cashier@restopos.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'cashier');
--- Both passwords are 'password'
+('Manager User', 'manager@restopos.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'manager'),
+('Cashier User', 'cashier@restopos.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'cashier'),
+('Waiter User', 'waiter@restopos.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'waiter'),
+('Kitchen User', 'kitchen@restopos.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'kitchen');
+-- All passwords are 'password'
 
 -- Seed Items
 INSERT INTO items (name, category, price, stock_qty) VALUES 
@@ -54,3 +57,19 @@ INSERT INTO customers (name, phone, address, nic, credit_limit) VALUES
 ('Kamal Perera', '0771234567', 'Colombo', '123456789V', 25000.00),
 ('Nimal Silva', '0719876543', 'Kandy', '987654321V', 15000.00),
 ('Saman Kumara', '0755555555', 'Galle', '555555555V', 10000.00);
+
+-- Seed Settings
+INSERT INTO settings (setting_key, setting_value) VALUES 
+('restaurant_name', 'RestoLedger Premium'),
+('restaurant_address', '123, Main Street, Colombo'),
+('restaurant_phone', '0112345678'),
+('currency_symbol', 'Rs.'),
+('service_charge_enabled', 'true'),
+('service_charge_rate', '10.00'),
+('tax_enabled', 'false'),
+('tax_rate', '0.00'),
+('stock_tracking_enabled', 'true'),
+('shift_enforcement_enabled', 'true'),
+('kot_printing_enabled', 'true'),
+('discount_approval_limit', '10.00'),
+('receipt_footer', 'Thank you for dining with us!');

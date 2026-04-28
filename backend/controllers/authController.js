@@ -1,10 +1,10 @@
-const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { db } = require('../config/db');
 
 const generateToken = (id, role) => {
     return jwt.sign({ id, role }, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES_IN
+        expiresIn: process.env.JWT_EXPIRES_IN || '1d'
     });
 };
 
@@ -15,7 +15,9 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        const user = await User.findOne({ email });
+        const [users] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+        const user = users[0];
+
         if (!user) {
             return res.status(401).json({ success: false, message: 'Invalid email or password' });
         }
@@ -28,11 +30,11 @@ exports.login = async (req, res) => {
         res.json({
             success: true,
             data: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                token: generateToken(user._id, user.role)
+                token: generateToken(user.id, user.role)
             }
         });
     } catch (error) {
@@ -46,7 +48,9 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('-password');
+        const [users] = await db.query('SELECT id, name, email, role, status FROM users WHERE id = ?', [req.user.id]);
+        const user = users[0];
+
         if (user) {
             res.json({ success: true, data: user });
         } else {

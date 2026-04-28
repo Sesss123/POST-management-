@@ -1,49 +1,58 @@
-const mongoose = require('mongoose');
-const Customer = require('../models/Customer');
-const Payment = require('../models/Payment');
-const Ledger = require('../models/Ledger');
+const { db } = require('../config/db');
 
 // @desc    Add customer payment
 // @route   POST /api/payments/customer-payment
 // @access  Private
 exports.addPayment = async (req, res) => {
     const { customer_id, amount, payment_method, note } = req.body;
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    const connection = await db.getConnection();
 
     try {
-        const customer = await Customer.findById(customer_id).session(session);
-        if (!customer) throw new Error('Customer not found');
+        await connection.beginTransaction();
 
-        const payment = await Payment.create([{
-            customer_id,
-            amount: parseFloat(amount),
-            payment_method,
-            note: note || '',
-            created_by: req.user.id
-        }], { session });
+        // 1. Get customer
+        const [customers] = await connection.query('SELECT * FROM customers WHERE id = ?', [customer_id]);
+        if (customers.length === 0) throw new Error('Customer not found');
+        const customer = customers[0];
 
-        customer.current_balance -= parseFloat(amount);
-        await customer.save({ session });
+        // 2. Insert payment
+        const [paymentResult] = await connection.query(
+            `INSERT INTO payments (customer_id, amount, payment_method, note, created_by)
+             VALUES (?, ?, ?, ?, ?)`,
+            [customer_id, parseFloat(amount), payment_method, note || '', req.user.id]
+        );
+        const paymentId = paymentResult.insertId;
 
-        await Ledger.create([{
-            customer_id,
-            payment_id: payment[0]._id,
-            type: 'credit',
-            amount: parseFloat(amount),
-            balance_after: customer.current_balance,
-            description: `Payment received. Method: ${payment_method}`
-        }], { session });
+        // 3. Update customer balance
+        const newBalance = customer.current_balance - parseFloat(amount);
+        await connection.query('UPDATE customers SET current_balance = ? WHERE id = ?', [newBalance, customer_id]);
 
-        await session.commitTransaction();
-        res.status(201).json({ success: true, message: 'Payment added successfully', data: { newBalance: customer.current_balance } });
+        // 4. Insert ledger record
+        await connection.query(
+            `INSERT INTO customer_ledger (customer_id, payment_id, type, amount, balance_after, description)
+             VALUES (?, ?, 'credit', ?, ?, ?)`,
+            [
+                customer_id, 
+                paymentId, 
+                parseFloat(amount), 
+                newBalance, 
+                `Payment received. Method: ${payment_method}`
+            ]
+        );
+
+        await connection.commit();
+        res.status(201).json({ 
+            success: true, 
+            message: 'Payment added successfully', 
+            data: { newBalance } 
+        });
 
     } catch (error) {
-        await session.abortTransaction();
+        await connection.rollback();
         console.error(error);
         res.status(500).json({ success: false, message: error.message || 'Failed to add payment' });
     } finally {
-        session.endSession();
+        connection.release();
     }
 };
 
@@ -52,7 +61,10 @@ exports.addPayment = async (req, res) => {
 // @access  Private
 exports.getCustomerPayments = async (req, res) => {
     try {
-        const payments = await Payment.find({ customer_id: req.params.customerId }).sort({ createdAt: -1 });
+        const [payments] = await db.query(
+            'SELECT * FROM payments WHERE customer_id = ? ORDER BY created_at DESC', 
+            [req.params.customerId]
+        );
         res.json({ success: true, data: payments });
     } catch (error) {
         console.error(error);

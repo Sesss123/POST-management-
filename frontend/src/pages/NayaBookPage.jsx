@@ -13,9 +13,12 @@ import {
   X,
   History,
   AlertCircle,
-  Clock
+  Clock,
+  Receipt,
+  Printer
 } from 'lucide-react';
 import { AppButton, AppCard, AppModal, StatCard, useToast, FormInput, FormSelect } from '../components/ui';
+import InvoicePrintModal from '../components/invoice/InvoicePrintModal';
 import { cn } from '../utils/cn';
 
 const NayaBookPage = () => {
@@ -25,6 +28,9 @@ const NayaBookPage = () => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [ledger, setLedger] = useState([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [paymentData, setPaymentData] = useState({
       amount: '',
       method: 'cash',
@@ -34,7 +40,27 @@ const NayaBookPage = () => {
 
   useEffect(() => {
     fetchCustomers();
+    fetchSettings();
   }, []);
+
+  const fetchSettings = async () => {
+    try {
+        const { data } = await settingApi.getAll();
+        setSettings(data.data);
+    } catch (err) {
+        console.error('Failed to fetch settings');
+    }
+  };
+
+  const handlePrintInvoice = async (invoiceId) => {
+    try {
+        const { data } = await invoiceApi.getById(invoiceId);
+        setSelectedInvoice({ ...data.data, settings });
+        setShowPrintModal(true);
+    } catch (err) {
+        toast.error('Failed to load invoice details');
+    }
+  };
 
   const fetchCustomers = async () => {
     try {
@@ -251,8 +277,16 @@ const NayaBookPage = () => {
                                                 <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Balance After: Rs. {parseFloat(entry.balance_after).toLocaleString()}</span>
                                             </div>
                                         </div>
-                                        <div className="p-4 bg-slate-50 rounded-2xl">
+                                        <div className="p-4 bg-slate-50 rounded-2xl flex justify-between items-center">
                                             <p className="text-sm text-slate-600 font-medium leading-relaxed">{entry.description}</p>
+                                            {entry.invoice_id && (
+                                                <button 
+                                                    onClick={() => handlePrintInvoice(entry.invoice_id)}
+                                                    className="ml-4 p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
+                                                >
+                                                    <Printer size={14} /> Print
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -338,6 +372,12 @@ const NayaBookPage = () => {
             </form>
         </div>
       </AppModal>
+
+      <InvoicePrintModal 
+        isOpen={showPrintModal} 
+        onClose={() => setShowPrintModal(false)} 
+        invoice={selectedInvoice} 
+      />
     </div>
   );
 };

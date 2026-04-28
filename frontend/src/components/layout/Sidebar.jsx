@@ -11,7 +11,11 @@ import {
   BarChart3, 
   UserCog, 
   LogOut,
-  ChevronLeft
+  ChevronLeft,
+  Clock,
+  PauseCircle,
+  ShieldCheck,
+  Kitchen
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../utils/cn';
@@ -41,64 +45,83 @@ const Sidebar = () => {
     navigate('/login');
   };
 
-  const menuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: ShoppingCart, label: 'Cash Sale', path: '/cash-sale' },
-    { icon: Table, label: 'Table Billing', path: '/table-billing' },
-    { icon: Users, label: 'Customers', path: '/customers' },
-    { icon: BookOpen, label: 'Naya Book', path: '/naya-book' },
-    { icon: FileText, label: 'Invoices', path: '/invoices' },
-    { icon: Menu, label: 'Menu/Items', path: '/items' },
-    { icon: BarChart3, label: 'Reports', path: '/reports' },
+  const allItems = [
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['admin', 'manager', 'cashier'] },
+    { icon: ShoppingCart, label: 'Cash Sale', path: '/cash-sale', roles: ['admin', 'manager', 'cashier'] },
+    { icon: Table, label: 'Table Billing', path: '/table-billing', roles: ['admin', 'manager', 'cashier', 'waiter'] },
+    { icon: Clock, label: 'KOTs', path: '/kots', roles: ['admin', 'manager', 'cashier', 'waiter', 'kitchen'] },
+    { icon: ShieldCheck, label: 'Kitchen Display', path: '/kitchen', roles: ['admin', 'manager', 'kitchen'] },
+    { icon: Clock, label: 'Shift Mgmt', path: '/shifts', roles: ['admin', 'manager', 'cashier'] },
+    { icon: PauseCircle, label: 'Held Bills', path: '/held-bills', roles: ['admin', 'manager', 'cashier'] },
+    { icon: Users, label: 'Customers', path: '/customers', roles: ['admin', 'manager', 'cashier'] },
+    { icon: BookOpen, label: 'Naya Book', path: '/naya-book', roles: ['admin', 'manager', 'cashier'] },
+    { icon: FileText, label: 'Invoices', path: '/invoices', roles: ['admin', 'manager', 'cashier'] },
+    { icon: Menu, label: 'Menu/Items', path: '/items', roles: ['admin', 'manager'] },
+    { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['admin', 'manager'] },
+    { icon: ShieldCheck, label: 'Settings', path: '/settings', roles: ['admin', 'manager'] },
+    { icon: UserCog, label: 'Users', path: '/users', roles: ['admin'] },
+    { icon: ShieldCheck, label: 'Audit Logs', path: '/audit-logs', roles: ['admin'] },
   ];
 
-  if (user?.role === 'admin') {
-    menuItems.push({ icon: UserCog, label: 'Users', path: '/users' });
-  }
+  const menuItems = allItems.filter(item => item.roles.includes(user?.role));
 
   return (
-    <div className="w-72 h-screen bg-white border-r border-slate-200 flex flex-col fixed left-0 top-0 z-40">
-      <div className="p-6">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30">
-            <ShoppingCart className="text-white" size={24} />
+    <aside className="w-72 bg-slate-900 h-screen flex flex-col shadow-2xl border-r border-slate-800 fixed left-0 top-0 z-40">
+      <div className="p-8">
+        <div className="flex items-center gap-3 mb-10 group">
+          <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-110 transition-transform duration-300">
+            <LayoutDashboard size={24} />
           </div>
           <div>
-            <h1 className="font-bold text-xl text-slate-900 leading-tight">RestoLedger</h1>
-            <p className="text-xs text-slate-500 font-medium tracking-wider uppercase">POS System</p>
+            <h1 className="text-xl font-black text-white tracking-tighter leading-none">Resto<span className="text-indigo-400">Ledger</span></h1>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mt-1">POS v2.0</p>
           </div>
         </div>
 
-        <nav className="space-y-1">
+        <nav className="space-y-1.5 overflow-y-auto max-h-[calc(100vh-250px)] custom-scrollbar pr-2">
           {menuItems.map((item) => (
-            <SidebarItem 
+            <Link
               key={item.path}
-              {...item}
-              active={location.pathname === item.path}
-            />
+              to={item.path}
+              className={cn(
+                "flex items-center gap-3 px-5 py-3.5 rounded-2xl transition-all duration-200 group relative overflow-hidden",
+                location.pathname === item.path
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              )}
+            >
+              <item.icon size={18} className={cn(
+                "transition-transform duration-300",
+                location.pathname === item.path ? "scale-110" : "group-hover:scale-110"
+              )} />
+              <span className="font-bold text-sm tracking-tight">{item.label}</span>
+              {location.pathname === item.path && (
+                <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-white/30 rounded-l-full" />
+              )}
+            </Link>
           ))}
         </nav>
       </div>
 
-      <div className="mt-auto p-6 border-t border-slate-100">
-        <div className="flex items-center gap-3 mb-6 px-2">
-          <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-indigo-600 font-bold border-2 border-white shadow-sm">
-            {user?.name?.charAt(0)}
-          </div>
-          <div className="overflow-hidden">
-            <p className="font-semibold text-slate-900 truncate">{user?.name}</p>
-            <p className="text-xs text-slate-500 capitalize">{user?.role}</p>
-          </div>
+      <div className="mt-auto p-8 border-t border-slate-800 bg-slate-950/30">
+        <div className="flex items-center gap-3 mb-6 px-1">
+            <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center text-indigo-400 font-black border border-slate-700">
+                {user?.name?.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-xs font-black text-white truncate">{user?.name}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">{user?.role}</p>
+            </div>
         </div>
-        <button 
+        <button
           onClick={handleLogout}
-          className="flex items-center gap-3 w-full px-4 py-3 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all group font-medium"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 text-slate-400 rounded-2xl hover:bg-rose-600 hover:text-white transition-all duration-300 font-black text-[10px] uppercase tracking-[0.1em] group"
         >
-          <LogOut size={20} className="group-hover:text-red-600" />
-          <span>Logout</span>
+          <LogOut size={14} className="group-hover:-translate-x-1 transition-transform" />
+          Logout
         </button>
       </div>
-    </div>
+    </aside>
   );
 };
 

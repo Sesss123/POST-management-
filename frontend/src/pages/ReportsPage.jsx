@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { reportApi } from '../api/api';
-import { BarChart3, Calendar, Download, TrendingUp, DollarSign, Users, Package } from 'lucide-react';
+import { BarChart3, Calendar, Download, TrendingUp, DollarSign, Users, Package, ChevronRight } from 'lucide-react';
 import { AppButton, AppCard, AppTable, StatCard, useToast } from '../components/ui';
 
 const ReportsPage = () => {
@@ -56,6 +57,9 @@ const ReportsPage = () => {
                 />
             </div>
             <AppButton variant="secondary" icon={Download} size="sm">Export CSV</AppButton>
+            <Link to="/reports/eod">
+                <AppButton variant="primary" icon={ChevronRight} size="sm">Full EOD Report</AppButton>
+            </Link>
         </div>
       </header>
 

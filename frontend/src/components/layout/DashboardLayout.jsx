@@ -17,7 +17,10 @@ import {
   Search,
   Menu,
   X,
-  Clock
+  Clock,
+  ChefHat,
+  History,
+  Settings
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
@@ -27,21 +30,24 @@ const DashboardLayout = () => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const navItems = [
-    { label: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { label: 'Cash Sale', path: '/cash-sale', icon: ShoppingCart },
-    { label: 'Table Billing', path: '/table-billing', icon: Utensils },
-    { label: 'Naya Book', path: '/naya-book', icon: BookOpen },
-    { label: 'Customers', path: '/customers', icon: Users },
-    { label: 'Invoices', path: '/invoices', icon: Receipt },
-    { label: 'Menu Items', path: '/items', icon: Package },
-    { label: 'Tables', path: '/tables', icon: Grid3X3 },
-    { label: 'Reports', path: '/reports', icon: BarChart3 },
+  const allNavItems = [
+    { label: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'manager', 'cashier', 'kitchen'] },
+    { label: 'Cash Sale', path: '/cash-sale', icon: ShoppingCart, roles: ['admin', 'manager', 'cashier'] },
+    { label: 'Table Billing', path: '/table-billing', icon: Utensils, roles: ['admin', 'manager', 'cashier', 'waiter'] },
+    { label: 'Naya Book', path: '/naya-book', icon: BookOpen, roles: ['admin', 'manager', 'cashier'] },
+    { label: 'Customers', path: '/customers', icon: Users, roles: ['admin', 'manager', 'cashier'] },
+    { label: 'Invoices', path: '/invoices', icon: Receipt, roles: ['admin', 'manager', 'cashier'] },
+    { label: 'Menu Items', path: '/items', icon: Package, roles: ['admin', 'manager'] },
+    { label: 'Tables', path: '/tables', icon: Grid3X3, roles: ['admin', 'manager'] },
+    { label: 'Reports', path: '/reports', icon: BarChart3, roles: ['admin', 'manager'] },
+    { label: 'Kitchen KDS', path: '/kitchen', icon: ChefHat, roles: ['admin', 'manager', 'kitchen'] },
+    { label: 'KOT Orders', path: '/kot-orders', icon: History, roles: ['admin', 'manager', 'cashier', 'waiter'] },
+    { label: 'User Shifts', path: '/shifts', icon: Clock, roles: ['admin', 'manager', 'cashier'] },
+    { label: 'Settings', path: '/settings', icon: Settings, roles: ['admin'] },
+    { label: 'Users', path: '/users', icon: ShieldCheck, roles: ['admin'] },
   ];
 
-  if (user?.role === 'admin') {
-    navItems.push({ label: 'Users', path: '/users', icon: ShieldCheck });
-  }
+  const navItems = allNavItems.filter(item => item.roles.includes(user?.role));
 
   const handleLogout = () => {
     logout();

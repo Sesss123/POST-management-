@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const connectDB = require('./config/db');
+const { connectDB } = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const itemRoutes = require('./routes/itemRoutes');
 const customerRoutes = require('./routes/customerRoutes');
@@ -10,6 +10,13 @@ const tableRoutes = require('./routes/tableRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const userRoutes = require('./routes/userRoutes');
+const kotRoutes = require('./routes/kotRoutes');
+const sessionRoutes = require('./routes/sessionRoutes');
+const shiftRoutes = require('./routes/shiftRoutes');
+const settingRoutes = require('./routes/settingRoutes');
+const auditRoutes = require('./routes/auditRoutes');
+const heldBillRoutes = require('./routes/heldBillRoutes');
+const kitchenRoutes = require('./routes/kitchenRoutes');
 
 dotenv.config();
 
@@ -31,6 +38,13 @@ app.use('/api/tables', tableRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/kot', kotRoutes);
+app.use('/api/table-sessions', sessionRoutes);
+app.use('/api/shifts', shiftRoutes);
+app.use('/api/settings', settingRoutes);
+app.use('/api/audit-logs', auditRoutes);
+app.use('/api/held-bills', heldBillRoutes);
+app.use('/api/kitchen', kitchenRoutes);
 
 // Base route
 app.get('/', (req, res) => {

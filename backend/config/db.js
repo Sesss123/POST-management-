@@ -1,16 +1,29 @@
-const mongoose = require('mongoose');
+const mysql = require('mysql2');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
+const pool = mysql.createPool({
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'restoledger_pos',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+
+const promisePool = pool.promise();
+
 const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/restoledger_pos');
-        console.log(`>>> MongoDB: Connected - ${conn.connection.host}`);
+        const connection = await promisePool.getConnection();
+        console.log(`>>> MySQL: Connected - ${process.env.DB_NAME}`);
+        connection.release();
     } catch (error) {
-        console.error(`Error: ${error.message}`);
+        console.error(`MySQL Connection Error: ${error.message}`);
         process.exit(1);
     }
 };
 
-module.exports = connectDB;
+module.exports = { connectDB, db: promisePool };
