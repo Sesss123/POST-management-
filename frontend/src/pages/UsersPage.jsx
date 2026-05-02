@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Plus, User, Mail, Lock, Shield } from 'lucide-react';
 import apiClient from '../api/apiClient';
-import { AppButton, AppCard, AppTable, StatusBadge, AppModal, FormInput, FormSelect, useToast } from '../components/ui';
+import { AppButton, AppCard, AppTable, StatusBadge, AppModal, FormInput, FormSelect, useToast, ResponsiveDataList } from '../components/ui';
+import { cn } from '../utils/cn';
 
 const UsersPage = () => {
   const toast = useToast();
@@ -45,29 +46,29 @@ const UsersPage = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="flex justify-between items-end">
-        <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-200">
-                <ShieldCheck size={24} />
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 lg:gap-0">
+        <div className="flex items-center gap-3 lg:gap-4">
+            <div className="w-10 h-10 lg:w-12 lg:h-12 bg-indigo-600 rounded-xl lg:rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-200 shrink-0">
+                <ShieldCheck size={20} className="lg:w-6 lg:h-6" />
             </div>
             <div>
-                <h1 className="text-3xl font-black text-slate-900 tracking-tight">System Security</h1>
-                <p className="text-slate-500 font-medium italic">Manage staff accounts and access roles</p>
+                <h1 className="text-xl lg:text-3xl font-black text-slate-900 tracking-tight uppercase lg:normal-case">System Security</h1>
+                <p className="text-slate-500 font-medium italic text-[10px] lg:text-sm">Manage staff accounts and access roles</p>
             </div>
         </div>
-        <AppButton icon={Plus} size="lg" onClick={() => setShowModal(true)}>Add System User</AppButton>
+        <AppButton icon={Plus} size="lg" className="w-full sm:w-auto uppercase tracking-widest text-[10px] lg:text-xs font-black" onClick={() => setShowModal(true)}>Add System User</AppButton>
       </header>
 
       <AppCard>
-        <AppTable 
+        <ResponsiveDataList 
+            loading={loading}
+            data={users}
             headers={[
                 { label: 'Full Name' },
                 { label: 'Email / ID' },
                 { label: 'Access Role' },
                 { label: 'Status', className: 'text-right' }
             ]}
-            data={users}
-            loading={loading}
             renderRow={(u) => (
                 <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-5 font-black text-slate-900">{u.name}</td>
@@ -85,6 +86,32 @@ const UsersPage = () => {
                     </td>
                     <td className="py-5 text-right"><StatusBadge status="active" /></td>
                 </tr>
+            )}
+            renderCard={(u) => (
+                <div key={u.id} className="p-5 space-y-4">
+                    <div className="flex justify-between items-start">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-indigo-600 font-black">
+                                {u.name.charAt(0)}
+                            </div>
+                            <div>
+                                <p className="text-sm font-black text-slate-900 uppercase tracking-tight">{u.name}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{u.email}</p>
+                            </div>
+                        </div>
+                        <StatusBadge status="active" />
+                    </div>
+                    
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-50">
+                        <Shield size={14} className={u.role === 'admin' ? "text-indigo-600" : "text-emerald-600"} />
+                        <span className={cn(
+                            "text-[10px] font-black uppercase tracking-[0.2em]",
+                            u.role === 'admin' ? "text-indigo-600" : "text-emerald-600"
+                        )}>
+                            {u.role} Account
+                        </span>
+                    </div>
+                </div>
             )}
         />
       </AppCard>

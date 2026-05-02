@@ -65,20 +65,45 @@
   @apply bg-white/70 backdrop-blur-md border border-white/20;
 }
 
-/* Custom Scrollbar for POS */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+@utility custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 10px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
 }
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+
+@utility custom-scrollbar-hide {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 10px;
+
+/* Responsive Layout Helpers */
+.pos-layout {
+  @apply h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] flex flex-col lg:flex-row overflow-hidden;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+
+.pos-content {
+  @apply flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-8;
+}
+
+/* Touch Device Optimizations */
+@media (pointer: coarse) {
+  .btn, button, input, select {
+    @apply min-h-[44px];
+  }
 }
 
 /* Print Styles */

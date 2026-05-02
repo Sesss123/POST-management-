@@ -22,6 +22,9 @@ exports.openShift = async (req, res) => {
             [req.user.id, opening_cash || 0, 'open']
         );
 
+        const { logAction } = require('../utils/logger');
+        await logAction(req.user.id, 'shift_opened', 'shift', result.insertId, null, { opening_cash });
+
         res.status(201).json({ success: true, message: 'Shift opened successfully', data: { id: result.insertId } });
     } catch (error) {
         console.error('Open Shift Error:', error);
@@ -152,6 +155,13 @@ exports.closeShift = async (req, res) => {
             [actual_cash, expectedCash, difference, note, shift.id]
         );
 
+        const { logAction } = require('../utils/logger');
+        await logAction(req.user.id, 'shift_closed', 'shift', shift.id, null, { actual_cash, expected_cash: expectedCash, difference });
+        
+        if (Math.abs(difference) > 0) {
+            await logAction(req.user.id, 'cash_mismatch_detected', 'shift', shift.id, null, { difference });
+        }
+
         await connection.commit();
         res.json({ success: true, message: 'Shift closed successfully', data: { expected_cash: expectedCash, difference } });
     } catch (error) {
@@ -184,6 +194,9 @@ exports.recordCashMovement = async (req, res) => {
             [shifts[0].id, req.user.id, type, amount, reason]
         );
 
+        const { logAction } = require('../utils/logger');
+        await logAction(req.user.id, 'cash_movement_created', 'cash_movement', shifts[0].id, null, { type, amount, reason });
+
         res.status(201).json({ success: true, message: 'Cash movement recorded' });
     } catch (error) {
         console.error('Cash Movement Error:', error);
@@ -199,7 +212,7 @@ exports.getShifts = async (req, res) => {
         let query = "SELECT s.*, u.name as user_name FROM shifts s JOIN users u ON s.user_id = u.id ";
         let params = [];
 
-        if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+        if (req.user.role !== 'admin') {
             query += " WHERE s.user_id = ? ";
             params.push(req.user.id);
         }

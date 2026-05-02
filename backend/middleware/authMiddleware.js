@@ -30,8 +30,23 @@ const adminOnly = (req, res, next) => {
 };
 
 const authorize = (...roles) => {
-    return (req, res, next) => {
+    return async (req, res, next) => {
         if (!roles.includes(req.user.role)) {
+            const { logAudit } = require('../utils/auditLogger');
+            await logAudit(null, {
+                userId: req.user.id,
+                action: 'unauthorized_access_attempt',
+                entityType: 'route',
+                newValue: { 
+                    method: req.method, 
+                    path: req.originalUrl, 
+                    required_roles: roles,
+                    user_role: req.user.role 
+                },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent']
+            });
+
             return res.status(403).json({
                 success: false,
                 message: `User role ${req.user.role} is not authorized to access this route`

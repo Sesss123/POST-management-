@@ -1,156 +1,93 @@
 import React, { useState } from 'react';
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { 
-  LayoutDashboard, 
-  ShoppingCart, 
-  Utensils, 
-  Users, 
-  BookOpen, 
-  Receipt, 
-  Package, 
-  Grid3X3, 
-  BarChart3, 
-  ShieldCheck, 
-  LogOut,
-  Bell,
-  Search,
   Menu,
-  X,
+  Bell,
   Clock,
-  ChefHat,
-  History,
-  Settings
+  ChevronDown,
+  X
 } from 'lucide-react';
+import Sidebar from './Sidebar';
 import { cn } from '../../utils/cn';
 
 const DashboardLayout = () => {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  const allNavItems = [
-    { label: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'manager', 'cashier', 'kitchen'] },
-    { label: 'Cash Sale', path: '/cash-sale', icon: ShoppingCart, roles: ['admin', 'manager', 'cashier'] },
-    { label: 'Table Billing', path: '/table-billing', icon: Utensils, roles: ['admin', 'manager', 'cashier', 'waiter'] },
-    { label: 'Naya Book', path: '/naya-book', icon: BookOpen, roles: ['admin', 'manager', 'cashier'] },
-    { label: 'Customers', path: '/customers', icon: Users, roles: ['admin', 'manager', 'cashier'] },
-    { label: 'Invoices', path: '/invoices', icon: Receipt, roles: ['admin', 'manager', 'cashier'] },
-    { label: 'Menu Items', path: '/items', icon: Package, roles: ['admin', 'manager'] },
-    { label: 'Tables', path: '/tables', icon: Grid3X3, roles: ['admin', 'manager'] },
-    { label: 'Reports', path: '/reports', icon: BarChart3, roles: ['admin', 'manager'] },
-    { label: 'Kitchen KDS', path: '/kitchen', icon: ChefHat, roles: ['admin', 'manager', 'kitchen'] },
-    { label: 'KOT Orders', path: '/kot-orders', icon: History, roles: ['admin', 'manager', 'cashier', 'waiter'] },
-    { label: 'User Shifts', path: '/shifts', icon: Clock, roles: ['admin', 'manager', 'cashier'] },
-    { label: 'Settings', path: '/settings', icon: Settings, roles: ['admin'] },
-    { label: 'Users', path: '/users', icon: ShieldCheck, roles: ['admin'] },
-  ];
-
-  const navItems = allNavItems.filter(item => item.roles.includes(user?.role));
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
+  // Map route to title (fallback to current Sidebar logic if needed)
   const getPageTitle = () => {
-    const current = navItems.find(item => item.path === location.pathname);
-    return current ? current.label : 'Details';
+    const path = location.pathname;
+    if (path === '/') return 'Dashboard';
+    const segment = path.split('/')[1];
+    return segment ? segment.replace(/-/g, ' ').toUpperCase() : 'RestoLedger';
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex overflow-hidden">
       {/* Sidebar - Desktop */}
-      <aside className="hidden lg:flex w-72 bg-slate-900 flex-col shrink-0 relative z-40">
-        <div className="p-8">
-            <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-900/50">
-                    <Utensils size={24} />
-                </div>
-                <div>
-                    <h1 className="text-xl font-black text-white tracking-tighter uppercase">RestoLedger</h1>
-                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">POS & Credit System</p>
-                </div>
-            </div>
-        </div>
-
-        <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => cn(
-                "flex items-center gap-4 px-6 py-4 rounded-2xl text-sm font-bold transition-all group",
-                isActive 
-                  ? "bg-indigo-600 text-white shadow-xl shadow-indigo-900/50" 
-                  : "text-slate-400 hover:text-white hover:bg-white/5"
-              )}
-            >
-              <item.icon size={20} className={cn("transition-transform group-hover:scale-110")} />
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="p-4 mt-auto">
-          <div className="bg-white/5 rounded-3xl p-6 mb-4">
-              <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-black">
-                      {user?.name?.charAt(0)}
-                  </div>
-                  <div className="overflow-hidden">
-                      <p className="text-sm font-bold text-white truncate">{user?.name}</p>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">{user?.role}</span>
-                  </div>
-              </div>
-              <button 
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white transition-all font-bold text-xs uppercase tracking-widest"
-              >
-                <LogOut size={16} />
-                Sign Out
-              </button>
-          </div>
-        </div>
+      <aside className={cn(
+        "hidden lg:block bg-slate-900 shrink-0 transition-all duration-300 relative z-40 overflow-hidden",
+        isSidebarCollapsed ? "w-0" : "w-72"
+      )}>
+        <Sidebar />
       </aside>
 
       {/* Main Area */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Topbar */}
-        <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-8 shrink-0 relative z-30">
+        <header className="h-16 lg:h-20 bg-white border-b border-slate-100 flex items-center justify-between px-4 lg:px-8 shrink-0 relative z-30">
           <div className="flex items-center gap-4">
             <button 
                 onClick={() => setIsMobileMenuOpen(true)}
-                className="lg:hidden p-2 text-slate-400 hover:bg-slate-50 rounded-xl"
+                className="lg:hidden p-2 text-slate-400 hover:bg-slate-50 rounded-xl transition-colors"
             >
                 <Menu size={24} />
             </button>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{getPageTitle()}</h2>
+            <button 
+                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                className="hidden lg:flex p-2 text-slate-400 hover:bg-slate-50 rounded-xl transition-colors items-center gap-2"
+                title={isSidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+            >
+                <Menu size={20} />
+                {isSidebarCollapsed && <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Open Menu</span>}
+            </button>
+            <h2 className="text-lg lg:text-2xl font-black text-slate-900 tracking-tight truncate">{getPageTitle()}</h2>
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl text-slate-400">
+          <div className="flex items-center gap-3 lg:gap-6">
+            <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl text-slate-400">
                 <Clock size={16} />
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
                     {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                 </span>
             </div>
-            <div className="relative">
-                <button className="p-2.5 text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors relative">
-                    <Bell size={22} />
-                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
-                </button>
-            </div>
-            <div className="w-10 h-10 rounded-2xl bg-indigo-50 border-2 border-indigo-100 flex items-center justify-center text-indigo-600 font-black">
-                {user?.name?.charAt(0)}
+            
+            <button className="p-2 lg:p-2.5 text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors relative">
+                <Bell size={20} />
+                <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 border-2 border-white rounded-full"></span>
+            </button>
+            
+            <div className="flex items-center gap-2 lg:gap-3 pl-2 border-l border-slate-100">
+                <div className="hidden md:block text-right">
+                    <p className="text-xs font-black text-slate-900 leading-none">{user?.name}</p>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user?.role}</p>
+                </div>
+                <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-indigo-50 border-2 border-indigo-100 flex items-center justify-center text-indigo-600 font-black text-xs lg:text-sm">
+                    {user?.name?.charAt(0).toUpperCase()}
+                </div>
             </div>
           </div>
         </header>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-            <div className="max-w-[1600px] mx-auto">
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+            <div className={cn(
+                "mx-auto transition-all duration-300",
+                location.pathname === '/cash-sale' || location.pathname === '/table-billing' ? "p-0 max-w-full" : "p-4 lg:p-8 max-w-[1600px]"
+            )}>
                 <Outlet />
             </div>
         </div>
@@ -158,32 +95,13 @@ const DashboardLayout = () => {
 
       {/* Mobile Sidebar */}
       {isMobileMenuOpen && (
-          <div className="fixed inset-0 z-50 lg:hidden">
-              <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
-              <div className="absolute left-0 top-0 bottom-0 w-72 bg-slate-900 flex flex-col p-6 animate-in slide-in-from-left duration-300">
-                  <div className="flex items-center justify-between mb-8">
-                      <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black">RL</div>
-                          <span className="text-white font-black uppercase tracking-tight">RestoLedger</span>
-                      </div>
-                      <button onClick={() => setIsMobileMenuOpen(false)} className="text-slate-400"><X size={24} /></button>
-                  </div>
-                  <nav className="flex-1 space-y-1">
-                      {navItems.map((item) => (
-                        <NavLink
-                          key={item.path}
-                          to={item.path}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                          className={({ isActive }) => cn(
-                            "flex items-center gap-4 px-6 py-4 rounded-2xl text-sm font-bold transition-all",
-                            isActive ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-                          )}
-                        >
-                          <item.icon size={20} />
-                          {item.label}
-                        </NavLink>
-                      ))}
-                  </nav>
+          <div className="fixed inset-0 z-[100] lg:hidden">
+              <div 
+                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" 
+                onClick={() => setIsMobileMenuOpen(false)} 
+              />
+              <div className="absolute left-0 top-0 bottom-0 shadow-2xl animate-in slide-in-from-left duration-300">
+                  <Sidebar mobile onClose={() => setIsMobileMenuOpen(false)} />
               </div>
           </div>
       )}

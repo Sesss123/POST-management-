@@ -1,5 +1,6 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
+const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
 
 // Helper to generate KOT number
 const generateKOTNo = () => {
@@ -11,7 +12,7 @@ const generateKOTNo = () => {
 // @access  Private
 exports.createKOT = async (req, res) => {
     const sessionId = req.params.id || req.body.session_id;
-    const { order_type } = req.body;
+    const { order_type } = req.body || {};
     const connection = await db.getConnection();
 
     try {
@@ -26,6 +27,15 @@ exports.createKOT = async (req, res) => {
             // but we can return a flag if the frontend needs to skip physical printing.
         }
 
+        // 1.5 Auto-mark non-kitchen items as sent so they don't appear in KOT
+        await connection.query(
+            `UPDATE order_items oi
+             JOIN items i ON oi.item_id = i.id
+             SET oi.kot_sent = TRUE
+             WHERE oi.session_id = ? AND i.send_to_kitchen = FALSE AND oi.combo_id IS NULL AND oi.status = "active"`,
+            [sessionId]
+        );
+
         // 2. Get unsent items for this session
         const [unsentItems] = await connection.query(
             'SELECT * FROM order_items WHERE session_id = ? AND kot_sent = FALSE AND status = "active"',
@@ -33,30 +43,61 @@ exports.createKOT = async (req, res) => {
         );
 
         if (unsentItems.length === 0) {
-            throw new Error('No new items to send to kitchen');
+            throw new Error('No kitchen items to send');
         }
 
-        // 2. Get table ID from session
-        const [sessions] = await connection.query('SELECT table_id FROM table_sessions WHERE id = ?', [sessionId]);
+        // 2. Get table ID and session details
+        const [sessions] = await connection.query('SELECT table_id, order_type, waiter_id FROM table_sessions WHERE id = ?', [sessionId]);
         if (sessions.length === 0) throw new Error('Session not found');
         const table_id = sessions[0].table_id;
+        const session_order_type = sessions[0].order_type;
+        const session_waiter_id = sessions[0].waiter_id;
 
         // 3. Create KOT order
         const kot_no = generateKOTNo();
+        const kotUuid = generateUuid();
         const [kotResult] = await connection.query(
-            `INSERT INTO kot_orders (kot_no, table_id, session_id, order_type, created_by)
-             VALUES (?, ?, ?, ?, ?)`,
-            [kot_no, table_id, sessionId, order_type || 'dine_in', req.user.id]
+            `INSERT INTO kot_orders (uuid, kot_no, table_id, session_id, order_type, waiter_id, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [kotUuid, kot_no, table_id, sessionId, session_order_type || order_type || 'dine_in', session_waiter_id, req.user.id]
         );
         const kotId = kotResult.insertId;
 
         // 4. Insert into kot_items and update order_items
         for (const item of unsentItems) {
-            await connection.query(
-                `INSERT INTO kot_items (kot_id, item_id, item_name, qty, note)
-                 VALUES (?, ?, ?, ?, ?)`,
-                [kotId, item.item_id, item.item_name, item.qty, item.note]
-            );
+            const itemUuid = generateUuid();
+            if (item.combo_id) {
+                await connection.query(
+                    `INSERT INTO kot_items (uuid, kot_id, combo_id, item_name, qty, note)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [itemUuid, kotId, item.combo_id, `[COMBO] ${item.item_name}`, item.qty, item.note]
+                );
+                const [components] = await connection.query(
+                    'SELECT ci.qty, i.name FROM combo_items ci JOIN items i ON ci.item_id = i.id WHERE ci.combo_id = ?',
+                    [item.combo_id]
+                );
+                for (const comp of components) {
+                    const compUuid = generateUuid();
+                    await connection.query(
+                        `INSERT INTO kot_items (uuid, kot_id, combo_id, item_name, qty, note)
+                         VALUES (?, ?, ?, ?, ?, ?)`,
+                        [compUuid, kotId, item.combo_id, `  > ${comp.name}`, comp.qty * item.qty, 'Combo Component']
+                    );
+                }
+            } else {
+                // Fetch modifiers for this item to display in KOT
+                const [itemMods] = await connection.query(
+                    'SELECT modifier_name FROM order_item_modifiers WHERE order_item_id = ?',
+                    [item.id]
+                );
+                const modifierText = itemMods.map(m => m.modifier_name).join(', ');
+
+                await connection.query(
+                    `INSERT INTO kot_items (uuid, kot_id, item_id, item_name, qty, note, special_note, modifier_names)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [itemUuid, kotId, item.item_id, item.item_name, item.qty, item.note, item.special_note, modifierText]
+                );
+            }
 
             await connection.query(
                 'UPDATE order_items SET kot_sent = TRUE WHERE id = ?',
@@ -107,20 +148,21 @@ exports.getKOTs = async (req, res) => {
 // @access  Private
 exports.getKOTDetails = async (req, res) => {
     try {
+        const where = buildIdOrUuidWhere('k', req.params.id);
         const [kots] = await db.query(
             `SELECT k.*, t.table_no, u.name as created_by_name
              FROM kot_orders k
              LEFT JOIN restaurant_tables t ON k.table_id = t.id
              LEFT JOIN users u ON k.created_by = u.id
-             WHERE k.id = ?`,
-            [req.params.id]
+             WHERE ${where.query}`,
+            [where.value]
         );
 
         if (kots.length === 0) return res.status(404).json({ success: false, message: 'KOT not found' });
 
-        const [items] = await db.query('SELECT * FROM kot_items WHERE kot_id = ?', [req.params.id]);
-        
         const kot = kots[0];
+        const [items] = await db.query('SELECT * FROM kot_items WHERE kot_id = ?', [kot.id]);
+        
         kot.items = items;
 
         // Add restaurant settings for printing
@@ -137,48 +179,22 @@ exports.getKOTDetails = async (req, res) => {
     }
 };
 
-// @desc    Update KOT status (Kitchen)
-// @route   PATCH /api/kot/:id/status
-// @access  Private
-exports.updateKOTStatus = async (req, res) => {
-    const { status } = req.body;
-    try {
-        await db.query('UPDATE kot_orders SET status = ? WHERE id = ?', [status, req.params.id]);
-        res.json({ success: true, message: `KOT status updated to ${status}` });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+// End of KOT Controller
 
-// @desc    Update individual KOT item status
-// @route   PATCH /api/kot/items/:id/status
+// @desc    Get all KOTs for a specific session
+// @route   GET /api/kot/session/:sessionId
 // @access  Private
-exports.updateKOTItemStatus = async (req, res) => {
-    const { status } = req.body;
-    try {
-        await db.query('UPDATE kot_items SET status = ? WHERE id = ?', [status, req.params.id]);
-        res.json({ success: true, message: `Item status updated to ${status}` });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
-
-// @desc    Get all active KOTs for kitchen display
-// @route   GET /api/kitchen/kots
-// @access  Private
-exports.getKitchenKOTs = async (req, res) => {
+exports.getKOTsBySession = async (req, res) => {
     try {
         const query = `
             SELECT k.*, t.table_no, u.name as created_by_name
             FROM kot_orders k
             LEFT JOIN restaurant_tables t ON k.table_id = t.id
             LEFT JOIN users u ON k.created_by = u.id
-            WHERE k.status IN ('pending', 'preparing', 'ready')
-            ORDER BY k.created_at ASC
+            WHERE k.session_id = ?
+            ORDER BY k.created_at DESC
         `;
-        const [kots] = await db.query(query);
+        const [kots] = await db.query(query, [req.params.sessionId]);
         
         for (let kot of kots) {
             const [items] = await db.query('SELECT * FROM kot_items WHERE kot_id = ?', [kot.id]);

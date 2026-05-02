@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -28,7 +28,14 @@ apiClient.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      
+      // Avoid redirection loops if already on login page or if it's the login request itself
+      const isLoginRequest = error.config.url.includes('/auth/login');
+      const isLoginPage = window.location.pathname.includes('/login');
+      
+      if (!isLoginRequest && !isLoginPage) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

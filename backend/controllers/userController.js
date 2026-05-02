@@ -34,6 +34,9 @@ exports.createUser = async (req, res) => {
             [name, email, hashedPassword, role || 'cashier']
         );
 
+        const { logAction } = require('../utils/logger');
+        await logAction(req.user.id, 'user_created', 'user', result.insertId, null, { name, email, role: role || 'cashier' });
+
         res.status(201).json({ 
             success: true, 
             data: { id: result.insertId, name, email, role: role || 'cashier' } 
@@ -50,11 +53,30 @@ exports.createUser = async (req, res) => {
 exports.updateUserStatus = async (req, res) => {
     const { status } = req.body;
     try {
-        const [result] = await db.query('UPDATE users SET status = ? WHERE id = ?', [status, req.params.id]);
-        if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'User not found' });
+        const [oldUser] = await db.query('SELECT status, role FROM users WHERE id = ?', [req.params.id]);
+        if (oldUser.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
+
+        await db.query('UPDATE users SET status = ? WHERE id = ?', [status, req.params.id]);
         
+        const action = status === 'active' ? 'user_reactivated' : 'user_deactivated';
+        const { logAction } = require('../utils/logger');
+        await logAction(req.user.id, action, 'user', req.params.id, { status: oldUser[0].status }, { status });
+
         const [updatedUser] = await db.query('SELECT id, name, email, role, status FROM users WHERE id = ?', [req.params.id]);
         res.json({ success: true, message: 'User status updated', data: updatedUser[0] });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+// @desc    Get all waiters
+// @route   GET /api/users/waiters
+// @access  Private/Admin,Manager,Cashier
+exports.getWaiters = async (req, res) => {
+    try {
+        const [waiters] = await db.query('SELECT id, name FROM users WHERE role IN ("cashier", "admin") AND status = "active" ORDER BY name ASC');
+        res.json({ success: true, data: waiters });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });

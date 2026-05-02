@@ -1,13 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const { getCustomers, createCustomer, getCustomerLedger, updateCustomerStatus } = require('../controllers/customerController');
-const { protect, adminOnly } = require('../middleware/authMiddleware');
+const customerController = require('../controllers/customerController');
+const { protect, adminOnly, authorize } = require('../middleware/authMiddleware');
 
 router.use(protect);
 
-router.get('/', getCustomers);
-router.post('/', createCustomer);
-router.get('/:id/ledger', getCustomerLedger);
-router.patch('/:id/status', adminOnly, updateCustomerStatus);
+router.use(authorize('admin', 'cashier'));
+
+router.get('/', customerController.getCustomers);
+router.get('/debtors', customerController.getDebtors);
+router.post('/', customerController.createCustomer);
+router.put('/:id', customerController.updateCustomer);
+router.get('/:id/ledger', customerController.getCustomerLedger);
+router.get('/:id/account', customerController.getAccountDetails);
+router.patch('/:id/status', authorize('admin'), customerController.updateCustomerStatus);
 
 module.exports = router;

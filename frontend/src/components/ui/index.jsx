@@ -1,3 +1,4 @@
+import React from 'react';
 import { cn } from '../../utils/cn';
 export * from './Feedback';
 
@@ -55,8 +56,8 @@ export const AppButton = ({
 export const AppCard = ({ title, subtitle, icon: Icon, action, children, className, bodyClassName }) => (
   <div className={cn('bg-white rounded-[32px] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden', className)}>
     {(title || Icon || action) && (
-      <div className="px-8 py-6 border-b border-slate-50 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="px-4 py-4 sm:px-8 sm:py-6 border-b border-slate-50 flex items-center justify-between">
+        <div className="flex items-center gap-3 sm:gap-4">
           {Icon && (
             <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-500 flex items-center justify-center">
               <Icon size={20} />
@@ -70,7 +71,7 @@ export const AppCard = ({ title, subtitle, icon: Icon, action, children, classNa
         {action && <div>{action}</div>}
       </div>
     )}
-    <div className={cn('p-8', bodyClassName)}>
+    <div className={cn('p-4 sm:p-8', bodyClassName)}>
       {children}
     </div>
   </div>
@@ -87,20 +88,20 @@ export const StatCard = ({ title, value, icon: Icon, trend, variant = 'default' 
   };
 
   return (
-    <div className={cn('rounded-[32px] p-8 shadow-xl relative overflow-hidden group', variants[variant])}>
+    <div className={cn('rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 shadow-xl relative overflow-hidden group', variants[variant])}>
       <div className="relative z-10">
         <div className={cn(
-          "w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110",
+          "w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center mb-3 sm:mb-4 transition-transform group-hover:scale-110",
           variant === 'default' ? "bg-slate-50 text-slate-500" : "bg-white/20 text-white"
         )}>
-          {Icon && <Icon size={24} />}
+          {Icon && <Icon size={20} className="sm:w-6 sm:h-6" />}
         </div>
-        <p className={cn("text-xs font-black uppercase tracking-[0.15em] mb-1", variant === 'default' ? "text-slate-400" : "text-white/60")}>
+        <p className={cn("text-[10px] sm:text-xs font-black uppercase tracking-[0.15em] mb-1", variant === 'default' ? "text-slate-400" : "text-white/60")}>
           {title}
         </p>
-        <h2 className="text-3xl font-black tracking-tight">{value}</h2>
+        <h2 className="text-xl sm:text-3xl font-black tracking-tight truncate">{value}</h2>
         {trend && (
-          <p className={cn("mt-2 text-xs font-bold", trend.positive ? "text-emerald-400" : "text-rose-400")}>
+          <p className={cn("mt-2 text-[10px] sm:text-xs font-bold", trend.positive ? "text-emerald-400" : "text-rose-400")}>
             {trend.label}
           </p>
         )}
@@ -111,7 +112,7 @@ export const StatCard = ({ title, value, icon: Icon, trend, variant = 'default' 
 };
 
 // Status Badge
-export const StatusBadge = ({ status, className }) => {
+export const StatusBadge = ({ status, children, label, className }) => {
   const config = {
     paid: { bg: 'bg-emerald-50', text: 'text-emerald-600', label: 'PAID' },
     unpaid: { bg: 'bg-rose-50', text: 'text-rose-600', label: 'UNPAID' },
@@ -122,10 +123,11 @@ export const StatusBadge = ({ status, className }) => {
     billing: { bg: 'bg-indigo-50', text: 'text-indigo-600', label: 'BILLING' },
     active: { bg: 'bg-emerald-50', text: 'text-emerald-600', label: 'ACTIVE' },
     blocked: { bg: 'bg-rose-50', text: 'text-rose-600', label: 'BLOCKED' },
-    credit: { bg: 'bg-purple-50', text: 'text-purple-600', label: 'CREDIT' }
+    credit: { bg: 'bg-purple-50', text: 'text-purple-600', label: 'CREDIT' },
+    default: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'INFO' }
   };
 
-  const style = config[status.toLowerCase()] || config.cancelled;
+  const style = config[status?.toLowerCase()] || config.default;
 
   return (
     <span className={cn(
@@ -134,19 +136,19 @@ export const StatusBadge = ({ status, className }) => {
       style.text,
       className
     )}>
-      {style.label}
+      {children || label || style.label}
     </span>
   );
 };
 
 // Table Component
-export const AppTable = ({ headers, data, renderRow, loading, emptyMessage }) => (
-  <div className="overflow-x-auto">
+export const AppTable = ({ headers, data, renderRow, loading, emptyMessage, className }) => (
+  <div className={cn("overflow-x-auto custom-scrollbar", className)}>
     <table className="w-full text-left">
       <thead>
         <tr className="border-b border-slate-100">
           {headers.map((h, i) => (
-            <th key={i} className={cn("pb-4 text-[10px] font-black text-slate-400 uppercase tracking-widest", h.className)}>
+            <th key={i} className={cn("pb-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap px-4", h.className)}>
               {h.label}
             </th>
           ))}
@@ -163,8 +165,65 @@ export const AppTable = ({ headers, data, renderRow, loading, emptyMessage }) =>
   </div>
 );
 
+// Generic Badge
+export const Badge = ({ children, variant = 'default', className }) => {
+  const variants = {
+    default: 'bg-slate-100 text-slate-600',
+    primary: 'bg-indigo-50 text-indigo-600',
+    success: 'bg-emerald-50 text-emerald-600',
+    warning: 'bg-amber-50 text-amber-600',
+    danger: 'bg-rose-50 text-rose-600',
+    info: 'bg-blue-50 text-blue-600'
+  };
+
+  return (
+    <span className={cn(
+      "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider",
+      variants[variant],
+      className
+    )}>
+      {children}
+    </span>
+  );
+};
+
+// Responsive Data List (Cards for mobile, Table for desktop)
+export const ResponsiveDataList = ({ data, renderCard, headers, renderRow, loading, emptyMessage }) => (
+    <>
+        <div className="block lg:hidden space-y-4">
+            {loading ? (
+                [...Array(3)].map((_, i) => <div key={i} className="h-32 bg-slate-100 animate-pulse rounded-3xl" />)
+            ) : data.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 italic bg-white rounded-3xl border border-dashed border-slate-200">
+                    {emptyMessage || 'No records found'}
+                </div>
+            ) : (
+                data.map((item, i) => renderCard(item, i))
+            )}
+        </div>
+        <div className="hidden lg:block">
+            <AppTable 
+                headers={headers} 
+                data={data} 
+                renderRow={renderRow} 
+                loading={loading} 
+                emptyMessage={emptyMessage} 
+            />
+        </div>
+    </>
+);
+
 // Modal Component
 export const AppModal = ({ isOpen, onClose, title, description, children, footer, size = 'md' }) => {
+  React.useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [isOpen]);
+
   if (!isOpen) return null;
   
   const sizes = {
@@ -176,21 +235,28 @@ export const AppModal = ({ isOpen, onClose, title, description, children, footer
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className={cn("bg-white rounded-[40px] shadow-2xl animate-in zoom-in-95 duration-300 w-full overflow-hidden flex flex-col", sizes[size])}>
-        <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+    <div className="fixed top-0 left-0 w-screen h-screen z-[99999] grid place-items-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className={cn(
+        "bg-white sm:rounded-[40px] shadow-2xl animate-in zoom-in-95 duration-300 w-full overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[90vh]", 
+        sizes[size]
+      )}>
+        <div className="px-6 py-4 sm:px-8 sm:py-6 border-b border-slate-50 flex items-center justify-between shrink-0">
           <div>
-            <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{title}</h3>
-            {description && <p className="text-slate-400 text-sm font-medium">{description}</p>}
+            <h3 className="text-lg sm:text-2xl font-black text-slate-900 uppercase tracking-tight truncate">{title}</h3>
+            {description && <p className="text-slate-400 text-[10px] sm:text-sm font-medium line-clamp-1">{description}</p>}
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors">
-            <svg size={24} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
-        <div className="p-8 flex-1 overflow-y-auto max-h-[80vh]">
+        <div className="p-6 sm:p-8 flex-1 overflow-y-auto custom-scrollbar">
           {children}
         </div>
-        {footer && <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">{footer}</div>}
+        {footer && (
+          <div className="p-6 sm:p-8 bg-slate-50 border-t border-slate-100 shrink-0">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -215,6 +281,7 @@ export const FormInput = ({ label, icon: Icon, error, className, ...props }) => 
   </div>
 );
 
+
 export const FormSelect = ({ label, options, className, ...props }) => (
   <div className={cn("space-y-1.5", className)}>
     {label && <label className="block text-sm font-bold text-slate-700 ml-1">{label}</label>}
@@ -226,3 +293,14 @@ export const FormSelect = ({ label, options, className, ...props }) => (
     </select>
   </div>
 );
+
+// Skeleton Component
+export const Skeleton = ({ className, variant = 'rect' }) => {
+    return (
+        <div className={cn(
+            "animate-pulse bg-slate-200",
+            variant === 'circle' ? "rounded-full" : "rounded-2xl",
+            className
+        )} />
+    );
+};

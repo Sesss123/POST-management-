@@ -4,33 +4,52 @@ import {
   Settings, 
   Store, 
   Percent, 
-  MapPin, 
-  Phone, 
   Save,
-  CheckCircle2,
-  ShieldCheck
+  ShieldCheck,
+  Printer,
+  ChefHat,
+  BookOpen,
+  PauseCircle,
+  Clock,
+  Package,
+  Grid3X3,
+  Calendar,
+  Database,
+  History,
+  ShoppingCart,
+  Truck,
+  LayoutDashboard,
+  Users,
+  UserCog,
+  BarChart3,
+  Utensils
 } from 'lucide-react';
-import { AppButton, AppCard, FormInput, useToast } from '../components/ui';
+import { AppButton, AppCard, FormInput, FormSelect, useToast } from '../components/ui';
+import { cn } from '../utils/cn';
+import { useSettings } from '../context/SettingsContext';
 
 const SettingsPage = () => {
   const toast = useToast();
-  const [settings, setSettings] = useState({
-    restaurant_name: '',
-    restaurant_address: '',
-    restaurant_phone: '',
-    currency_symbol: 'Rs.',
-    tax_enabled: 'false',
-    tax_rate: '0',
-    service_charge_enabled: 'true',
-    service_charge_rate: '10',
-    shift_enforcement_enabled: 'true',
-    kot_printing_enabled: 'true',
-    stock_tracking_enabled: 'true',
-    discount_approval_limit: '1000',
-    receipt_footer_message: 'Thank you for your visit!'
-  });
+  const { refreshSettings } = useSettings();
+  const [groupedSettings, setGroupedSettings] = useState({});
+  const [activeTab, setActiveTab] = useState('business');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const tabs = [
+    { id: 'business', label: 'Business Info', icon: Store },
+    { id: 'billing', label: 'Billing & Tax', icon: Percent },
+    { id: 'receipt_print', label: 'Receipt & Print', icon: Printer },
+    { id: 'kot', label: 'KOT & Kitchen', icon: ChefHat },
+    { id: 'naya_book', label: 'Naya Book', icon: BookOpen },
+    { id: 'held_bills', label: 'Held Bills', icon: PauseCircle },
+    { id: 'shifts', label: 'Shifts', icon: Clock },
+    { id: 'stock_menu', label: 'Stock & Menu', icon: Package },
+    { id: 'orders_tables', label: 'Orders & Tables', icon: Grid3X3 },
+    { id: 'reservations', label: 'Reservations', icon: Calendar },
+    { id: 'security', label: 'Security', icon: ShieldCheck },
+    { id: 'backup', label: 'Backup', icon: Database },
+  ];
 
   useEffect(() => {
     fetchSettings();
@@ -39,7 +58,7 @@ const SettingsPage = () => {
   const fetchSettings = async () => {
     try {
       const { data } = await settingApi.getAll();
-      setSettings(prev => ({ ...prev, ...data.data }));
+      setGroupedSettings(data.data);
     } catch (err) {
       toast.error('Failed to load settings');
     } finally {
@@ -47,191 +66,171 @@ const SettingsPage = () => {
     }
   };
 
-  const handleUpdate = async (e) => {
-    e.preventDefault();
+  const handleInputChange = (group, key, value) => {
+    setGroupedSettings(prev => ({
+      ...prev,
+      [group]: {
+        ...prev[group],
+        [key]: {
+          ...prev[group][key],
+          value: value
+        }
+      }
+    }));
+  };
+
+  const handleSaveSection = async (groupName) => {
     setSaving(true);
     try {
-      await settingApi.update(settings);
-      toast.success('Settings updated successfully');
+      // Extract values from our state for the backend
+      const settingsToUpdate = {};
+      Object.entries(groupedSettings[groupName]).forEach(([key, data]) => {
+        settingsToUpdate[key] = data.value;
+      });
+
+      await settingApi.update({
+        group_name: groupName,
+        settings: settingsToUpdate
+      });
+      
+      toast.success(`${tabs.find(t => t.id === groupName)?.label} updated successfully`);
+      await refreshSettings(); // Sync global state
     } catch (err) {
-      toast.error('Failed to update settings');
+      toast.error(`Failed to update settings: ${err.response?.data?.message || err.message}`);
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) return <div className="p-8 text-center font-bold">Loading system configurations...</div>;
+  if (loading) return (
+    <div className="h-full flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-slate-500 font-bold animate-pulse uppercase tracking-widest text-[10px]">Synchronizing System Config...</p>
+        </div>
+    </div>
+  );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-in fade-in duration-500 pb-12">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200">
+              <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-xl shadow-indigo-200">
                   <Settings size={24} />
               </div>
               <div>
-                  <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">System Settings</h2>
-                  <p className="text-slate-400 text-sm font-medium">Configure your restaurant identity and billing rules</p>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">System Settings</h2>
+                  <p className="text-slate-400 text-sm font-medium">Global configuration for RestoLedger POS</p>
               </div>
           </div>
-          <AppButton 
-            variant="primary" 
-            icon={Save} 
-            onClick={handleUpdate} 
-            loading={saving}
-            className="px-8"
-          >
-              Save All Changes
-          </AppButton>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Identity Section */}
-          <AppCard title="Restaurant Identity" icon={Store}>
-              <div className="space-y-6">
-                  <FormInput 
-                    label="Restaurant Name" 
-                    placeholder="e.g. Blue Lagoon Restaurant"
-                    icon={Store}
-                    value={settings.restaurant_name}
-                    onChange={(e) => setSettings({ ...settings, restaurant_name: e.target.value })}
-                  />
-                  <FormInput 
-                    label="Address" 
-                    placeholder="123 Main Street, Colombo"
-                    icon={MapPin}
-                    value={settings.restaurant_address}
-                    onChange={(e) => setSettings({ ...settings, restaurant_address: e.target.value })}
-                  />
-                  <FormInput 
-                    label="Contact Number" 
-                    placeholder="+94 77 123 4567"
-                    icon={Phone}
-                    value={settings.restaurant_phone}
-                    onChange={(e) => setSettings({ ...settings, restaurant_phone: e.target.value })}
-                  />
-                  <FormInput 
-                    label="Receipt Footer Message" 
-                    placeholder="Thank you for visiting us!"
-                    value={settings.receipt_footer_message}
-                    onChange={(e) => setSettings({ ...settings, receipt_footer_message: e.target.value })}
-                  />
+      <div className="flex flex-col lg:flex-row gap-8">
+          {/* Tabs Sidebar */}
+          <aside className="lg:w-72 shrink-0">
+              <div className="bg-white rounded-3xl border border-slate-100 p-2 shadow-sm sticky top-24">
+                  {tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                            "w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all",
+                            activeTab === tab.id 
+                                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200" 
+                                : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                        )}
+                      >
+                          <tab.icon size={16} />
+                          {tab.label}
+                      </button>
+                  ))}
               </div>
-          </AppCard>
+          </aside>
 
-          {/* Billing Rules */}
-          <AppCard title="Billing & Tax Rules" icon={Percent}>
-              <div className="space-y-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-slate-700">Tax Settings</span>
-                    <input 
-                      type="checkbox"
-                      checked={settings.tax_enabled === 'true' || settings.tax_enabled === true}
-                      onChange={(e) => setSettings({ ...settings, tax_enabled: String(e.target.checked) })}
-                      className="w-4 h-4 accent-indigo-600"
-                    />
-                  </div>
-                  <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                      <FormInput 
-                        label="Tax Rate (%)" 
-                        type="number"
-                        placeholder="0"
-                        icon={Percent}
-                        value={settings.tax_rate}
-                        disabled={settings.tax_enabled === 'false' || settings.tax_enabled === false}
-                        onChange={(e) => setSettings({ ...settings, tax_rate: e.target.value })}
-                      />
-                  </div>
+          {/* Settings Content */}
+          <main className="flex-1 max-w-4xl">
+              <div className="space-y-8">
+                  {tabs.map((tab) => (
+                      activeTab === tab.id && (
+                        <div key={tab.id} className="animate-in fade-in slide-in-from-right-4 duration-300">
+                            <AppCard 
+                                title={tab.label} 
+                                icon={tab.icon}
+                                headerAction={
+                                    <AppButton 
+                                        size="sm" 
+                                        variant="primary" 
+                                        icon={Save} 
+                                        onClick={() => handleSaveSection(tab.id)}
+                                        loading={saving}
+                                        className="px-6 rounded-xl"
+                                    >
+                                        Save {tab.label}
+                                    </AppButton>
+                                }
+                            >
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-2">
+                                    {Object.entries(groupedSettings[tab.id] || {}).map(([key, setting]) => (
+                                        <div key={key} className={cn(
+                                            "space-y-2",
+                                            setting.type === 'string' && key.includes('message') ? "md:col-span-2" : ""
+                                        )}>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    {setting.label}
+                                                </label>
+                                            </div>
 
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-bold text-slate-700">Service Charge</span>
-                    <input 
-                      type="checkbox"
-                      checked={settings.service_charge_enabled === 'true' || settings.service_charge_enabled === true}
-                      onChange={(e) => setSettings({ ...settings, service_charge_enabled: String(e.target.checked) })}
-                      className="w-4 h-4 accent-indigo-600"
-                    />
-                  </div>
-                  <div className="p-6 bg-indigo-50 rounded-3xl border border-indigo-100">
-                      <FormInput 
-                        label="Service Charge Rate (%)" 
-                        type="number"
-                        placeholder="10"
-                        icon={Percent}
-                        value={settings.service_charge_rate}
-                        disabled={settings.service_charge_enabled === 'false' || settings.service_charge_enabled === false}
-                        onChange={(e) => setSettings({ ...settings, service_charge_rate: e.target.value })}
-                      />
-                  </div>
-
-                  <FormInput 
-                    label="Currency Symbol" 
-                    placeholder="Rs."
-                    value={settings.currency_symbol}
-                    onChange={(e) => setSettings({ ...settings, currency_symbol: e.target.value })}
-                  />
+                                            {setting.type === 'boolean' ? (
+                                                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 transition-colors">
+                                                    <span className="text-xs font-bold text-slate-700">{setting.description}</span>
+                                                    <div 
+                                                        onClick={() => handleInputChange(tab.id, key, !setting.value)}
+                                                        className={cn(
+                                                            "w-12 h-6 rounded-full p-1 cursor-pointer transition-all duration-300",
+                                                            setting.value ? "bg-indigo-600" : "bg-slate-300"
+                                                        )}
+                                                    >
+                                                        <div className={cn(
+                                                            "w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-300",
+                                                            setting.value ? "translate-x-6" : "translate-x-0"
+                                                        )} />
+                                                    </div>
+                                                </div>
+                                            ) : setting.type === 'select' ? (
+                                                <FormSelect 
+                                                    value={setting.value}
+                                                    onChange={(e) => handleInputChange(tab.id, key, e.target.value)}
+                                                    options={setting.options.map(opt => ({
+                                                        value: opt,
+                                                        label: opt.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+                                                    }))}
+                                                />
+                                            ) : (
+                                                <FormInput 
+                                                    type={setting.type === 'number' ? 'number' : 'text'}
+                                                    value={setting.value}
+                                                    onChange={(e) => handleInputChange(tab.id, key, e.target.value)}
+                                                    placeholder={setting.description}
+                                                    className="bg-slate-50 border-slate-100 focus:bg-white"
+                                                    readOnly={key === 'system_version'}
+                                                />
+                                            )}
+                                            <p className="text-[9px] text-slate-400 italic px-1">{setting.description}</p>
+                                        </div>
+                                    ))}
+                                    {(!groupedSettings[tab.id] || Object.keys(groupedSettings[tab.id]).length === 0) && (
+                                        <div className="md:col-span-2 py-12 text-center">
+                                            <p className="text-slate-400 text-sm italic">No settings found in this group.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </AppCard>
+                        </div>
+                      )
+                  ))}
               </div>
-          </AppCard>
-
-          {/* Security & Access */}
-          <AppCard title="Security & Operations" icon={ShieldCheck}>
-              <div className="space-y-4">
-                  <div className="p-4 bg-slate-50 rounded-2xl">
-                      <FormInput 
-                        label="Max Discount without Approval (Fixed Amount)" 
-                        type="number"
-                        value={settings.discount_approval_limit}
-                        onChange={(e) => setSettings({ ...settings, discount_approval_limit: e.target.value })}
-                      />
-                  </div>
-                  
-                  <div className="flex items-center justify-between p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                      <div className="flex items-center gap-3">
-                          <ShieldCheck className="text-indigo-600" size={18} />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-bold text-indigo-900 leading-none">Enforce Shifts</span>
-                            <span className="text-[10px] font-medium text-indigo-400 uppercase mt-1">Cashier cannot bill without open shift</span>
-                          </div>
-                      </div>
-                      <input 
-                        type="checkbox" 
-                        checked={settings.shift_enforcement_enabled === 'true' || settings.shift_enforcement_enabled === true}
-                        onChange={(e) => setSettings({ ...settings, shift_enforcement_enabled: String(e.target.checked) })}
-                        className="w-5 h-5 accent-indigo-600 cursor-pointer"
-                      />
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                      <div className="flex items-center gap-3">
-                          <CheckCircle2 className="text-emerald-500" size={18} />
-                          <span className="text-sm font-bold text-slate-700">KOT Printing</span>
-                      </div>
-                      <input 
-                        type="checkbox" 
-                        checked={settings.kot_printing_enabled === 'true' || settings.kot_printing_enabled === true}
-                        onChange={(e) => setSettings({ ...settings, kot_printing_enabled: String(e.target.checked) })}
-                        className="w-5 h-5 accent-indigo-600 cursor-pointer"
-                      />
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                      <div className="flex items-center gap-3">
-                          <CheckCircle2 className="text-emerald-500" size={18} />
-                          <span className="text-sm font-bold text-slate-700">Stock Tracking</span>
-                      </div>
-                      <input 
-                        type="checkbox" 
-                        checked={settings.stock_tracking_enabled === 'true' || settings.stock_tracking_enabled === true}
-                        onChange={(e) => setSettings({ ...settings, stock_tracking_enabled: String(e.target.checked) })}
-                        className="w-5 h-5 accent-indigo-600 cursor-pointer"
-                      />
-                  </div>
-
-                  <p className="text-[10px] font-medium text-slate-400 text-center uppercase tracking-widest mt-4">
-                      V 2.1.0 - Real World Upgrade Ready
-                  </p>
-              </div>
-          </AppCard>
+          </main>
       </div>
     </div>
   );

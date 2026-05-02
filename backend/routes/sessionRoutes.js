@@ -16,6 +16,8 @@ router.patch('/:id/void-item', sessionController.voidSessionItem);
 router.post('/:id/send-kot', createKOT);
 router.post('/:id/final-bill/pay-now', sessionController.payNowCheckout);
 router.post('/:id/final-bill/add-to-credit', sessionController.addToCreditCheckout);
-router.post('/:id/split-bill', sessionController.splitBill);
-
+const { splitBill } = require('../controllers/invoiceController');
+router.post('/:id/split-bill', splitBill);
+router.post('/:id/transfer', sessionController.transferTable);
+router.post('/:id/merge', sessionController.mergeTable);
 module.exports = router;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -19,8 +19,14 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
-  const { login } = useAuth();
+  const { login, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,7 +41,9 @@ const LoginPage = () => {
         setError(result.message || 'Invalid credentials');
       }
     } catch (err) {
-      setError('Connection failed. Please try again.');
+      console.error(err);
+      const message = err.response?.data?.message || 'Connection failed. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -86,16 +94,20 @@ const LoginPage = () => {
             </div>
 
             <div className="mt-auto relative z-10 pt-12">
-                <div className="p-6 bg-white/5 rounded-[32px] border border-white/5 backdrop-blur-sm">
-                    <div className="flex items-center gap-3 mb-3 text-indigo-400">
-                        <Info size={18} />
-                        <span className="text-xs font-black uppercase tracking-widest">Demo Access</span>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center bg-white/5 p-2 px-3 rounded-xl border border-white/5">
+                            <p className="text-[10px] text-slate-400 font-black uppercase">Admin</p>
+                            <p className="text-[10px] text-white font-bold">admin@restopos.com</p>
+                        </div>
+                        <div className="flex justify-between items-center bg-white/5 p-2 px-3 rounded-xl border border-white/5">
+                            <p className="text-[10px] text-slate-400 font-black uppercase">Cashier</p>
+                            <p className="text-[10px] text-white font-bold">cashier@restopos.com</p>
+                        </div>
+                        <div className="flex justify-between items-center bg-indigo-600/20 p-2 px-3 rounded-xl border border-indigo-500/20">
+                            <p className="text-[10px] text-indigo-300 font-black uppercase">Password</p>
+                            <p className="text-[10px] text-white font-bold">admin123</p>
+                        </div>
                     </div>
-                    <div className="space-y-2">
-                        <p className="text-xs text-slate-400 font-bold">Admin: <span className="text-white">admin@restopos.com</span></p>
-                        <p className="text-xs text-slate-400 font-bold">Password: <span className="text-white">password</span></p>
-                    </div>
-                </div>
             </div>
 
             <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-indigo-600 opacity-10 rounded-full blur-[80px]" />

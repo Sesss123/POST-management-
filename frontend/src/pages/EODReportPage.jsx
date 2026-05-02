@@ -68,27 +68,27 @@ const EODReportPage = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-12 print:p-0 print:m-0">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-8 rounded-[40px] shadow-xl border border-slate-100 print:shadow-none print:border-none">
-        <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-indigo-600 text-white rounded-[24px] flex items-center justify-center shadow-lg shadow-indigo-200">
-                <BarChart3 size={32} />
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 lg:p-8 rounded-2xl lg:rounded-[40px] shadow-xl border border-slate-100 print:shadow-none print:border-none">
+        <div className="flex items-center gap-3 lg:gap-4">
+            <div className="w-12 h-12 lg:w-16 lg:h-16 bg-indigo-600 text-white rounded-xl lg:rounded-[24px] flex items-center justify-center shadow-lg shadow-indigo-200 shrink-0">
+                <BarChart3 size={24} className="lg:w-8 lg:h-8" />
             </div>
             <div>
-                <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">End-of-Day Report</h2>
-                <div className="flex items-center gap-2 mt-1">
-                    <Calendar size={14} className="text-slate-400" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                <h2 className="text-xl lg:text-2xl font-black text-slate-900 uppercase tracking-tight">EOD Report</h2>
+                <div className="flex items-center gap-2 mt-0.5 lg:mt-1">
+                    <Calendar size={12} className="text-slate-400 lg:w-3.5 lg:h-3.5" />
+                    <span className="text-[10px] lg:text-xs font-bold text-slate-400 uppercase tracking-widest line-clamp-1">{new Date(date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
                 </div>
             </div>
         </div>
-        <div className="flex items-center gap-3 w-full md:w-auto print:hidden">
+        <div className="flex items-center gap-2 lg:gap-3 w-full sm:w-auto print:hidden">
             <input 
                 type="date" 
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-2.5 font-bold text-slate-900 outline-none focus:border-indigo-600 transition-all cursor-pointer"
+                className="flex-1 sm:flex-none bg-slate-50 border-2 border-slate-100 rounded-xl lg:rounded-2xl px-3 lg:px-4 py-2 lg:py-2.5 font-bold text-slate-900 outline-none focus:border-indigo-600 transition-all cursor-pointer text-xs lg:text-base"
             />
-            <AppButton variant="secondary" icon={Printer} onClick={handlePrint}>Print Report</AppButton>
+            <AppButton variant="secondary" icon={Printer} onClick={handlePrint} className="uppercase tracking-widest text-[10px] lg:text-xs font-black">Print</AppButton>
         </div>
       </div>
 

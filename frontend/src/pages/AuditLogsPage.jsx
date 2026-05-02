@@ -8,10 +8,50 @@ import {
   User,
   Activity,
   ArrowRightCircle,
-  AlertCircle
+  AlertCircle,
+  Clock
 } from 'lucide-react';
 import { AppCard, AppTable, useToast, StatusBadge } from '../components/ui';
 import { cn } from '../utils/cn';
+
+// Helper: parse JSON string safely
+const parseJSON = (str) => {
+  if (!str) return null;
+  if (typeof str === 'object') return str;
+  try { return JSON.parse(str); } catch { return null; }
+};
+
+// Renders the new_value (or old_value fallback) as readable key:value pills
+const AuditDetails = ({ log }) => {
+  const data = parseJSON(log.new_value) || parseJSON(log.old_value);
+
+  if (!data) return <span className="text-slate-300 font-bold text-xs">—</span>;
+
+  const entries = Object.entries(data).filter(([, v]) => v !== null && v !== undefined && v !== '');
+
+  if (entries.length === 0) return <span className="text-slate-300 font-bold text-xs">—</span>;
+
+  return (
+    <div className="flex flex-wrap gap-1 max-w-sm">
+      {entries.slice(0, 4).map(([k, v]) => (
+        <span
+          key={k}
+          className="inline-flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-600 group-hover:bg-indigo-50 transition-colors"
+        >
+          <span className="text-slate-400 font-semibold">{k}:</span>
+          <span className="truncate max-w-[120px]">
+            {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+          </span>
+        </span>
+      ))}
+      {entries.length > 4 && (
+        <span className="inline-flex items-center bg-slate-200 rounded-lg px-2 py-0.5 text-[11px] font-bold text-slate-500">
+          +{entries.length - 4} more
+        </span>
+      )}
+    </div>
+  );
+};
 
 const AuditLogsPage = () => {
   const toast = useToast();
@@ -41,10 +81,10 @@ const AuditLogsPage = () => {
   };
 
   const filteredLogs = logs.filter(log => 
-    log.action.toLowerCase().includes(search.toLowerCase()) ||
-    log.module.toLowerCase().includes(search.toLowerCase()) ||
-    log.user_name.toLowerCase().includes(search.toLowerCase()) ||
-    (log.details && log.details.toLowerCase().includes(search.toLowerCase()))
+    (log.action?.toLowerCase().includes(search.toLowerCase())) ||
+    (log.entity_type?.toLowerCase().includes(search.toLowerCase())) ||
+    (log.user_name?.toLowerCase().includes(search.toLowerCase())) ||
+    (log.details && log.details.toString().toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
@@ -76,7 +116,7 @@ const AuditLogsPage = () => {
             headers={[
                 { label: 'Time' },
                 { label: 'User' },
-                { label: 'Module' },
+                { label: 'Type' },
                 { label: 'Action' },
                 { label: 'Details' }
             ]}
@@ -103,10 +143,10 @@ const AuditLogsPage = () => {
                     <td className="py-5">
                         <StatusBadge 
                             status={
-                                log.module === 'INVOICE' ? 'active' : 
-                                log.module === 'SHIFT' ? 'warning' : 'default'
+                                log.entity_type === 'invoice' ? 'active' : 
+                                log.entity_type === 'shift' ? 'warning' : 'default'
                             } 
-                            text={log.module} 
+                            label={log.entity_type} 
                         />
                     </td>
                     <td className="py-5">
@@ -116,9 +156,7 @@ const AuditLogsPage = () => {
                         </div>
                     </td>
                     <td className="py-5">
-                        <p className="text-sm font-medium text-slate-500 max-w-md truncate group-hover:whitespace-normal group-hover:overflow-visible transition-all">
-                            {log.details || '-'}
-                        </p>
+                        <AuditDetails log={log} />
                     </td>
                 </tr>
             )}

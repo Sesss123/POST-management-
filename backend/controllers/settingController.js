@@ -6,58 +6,133 @@ const { logAction } = require('../utils/logger');
 // @access  Private
 exports.getSettings = async (req, res) => {
     try {
-        const [settings] = await db.query('SELECT * FROM settings');
-        // Convert array of {setting_key, setting_value} to an object
-        const settingsObj = settings.reduce((acc, s) => {
-            acc[s.setting_key] = s.setting_value;
+        const [settings] = await db.query('SELECT * FROM settings ORDER BY group_name, setting_key');
+        
+        // Group settings by group_name for easier consumption in frontend
+        const groupedSettings = settings.reduce((acc, s) => {
+            if (!acc[s.group_name]) acc[s.group_name] = {};
+            acc[s.group_name][s.setting_key] = {
+                value: s.setting_type === 'boolean' ? s.setting_value === 'true' : 
+                       s.setting_type === 'number' ? parseFloat(s.setting_value) : s.setting_value,
+                type: s.setting_type,
+                label: s.label || s.setting_key.split('_').join(' '),
+                description: s.description,
+                options: s.options ? s.options.split(',') : []
+            };
             return acc;
         }, {});
-        res.json({ success: true, data: settingsObj });
+
+        // Also provide a flat key-value object for quick lookups in backend
+        const flatSettings = settings.reduce((acc, s) => {
+            let val = s.setting_value;
+            if (s.setting_type === 'number') val = parseFloat(val);
+            if (s.setting_type === 'boolean') val = val === 'true';
+            acc[s.setting_key] = val;
+            return acc;
+        }, {});
+
+        res.json({ 
+            success: true, 
+            data: groupedSettings,
+            flat: flatSettings 
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
-// @desc    Update settings
-// @route   POST /api/settings
+// @desc    Get settings by group
+// @route   GET /api/settings/group/:groupName
+// @access  Private
+exports.getSettingsByGroup = async (req, res) => {
+    try {
+        const [settings] = await db.query('SELECT * FROM settings WHERE group_name = ?', [req.params.groupName]);
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+// @desc    Update multiple settings
+// @route   PUT /api/settings
 // @access  Private/Admin
 exports.updateSettings = async (req, res) => {
-    const settings = req.body; // { setting_key: setting_value, ... }
+    const { group_name, settings } = req.body; // { group_name: 'stock_menu', settings: { key: value, ... } }
     const connection = await db.getConnection();
 
     try {
         await connection.beginTransaction();
 
-        const [oldSettings] = await connection.query('SELECT * FROM settings');
-        const oldSettingsObj = oldSettings.reduce((acc, s) => {
-            acc[s.setting_key] = s.setting_value;
-            return acc;
-        }, {});
-
         for (const [key, value] of Object.entries(settings)) {
-            await connection.query(
-                'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
-                [key, String(value), String(value)]
-            );
-        }
+            // Get old value for audit log
+            const [oldVal] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = ?', [key]);
+            
+            if (oldVal.length > 0) {
+                const newValue = String(value);
+                await connection.query(
+                    'UPDATE settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?',
+                    [newValue, req.user.id, key]
+                );
 
-        await logAction(
-            req.user.id,
-            'settings_updated',
-            'settings',
-            null,
-            oldSettingsObj,
-            settings
-        );
+                if (oldVal[0].setting_value !== newValue) {
+                    await logAction(
+                        req.user.id,
+                        'settings_updated',
+                        'settings',
+                        null,
+                        { [key]: oldVal[0].setting_value },
+                        { [key]: newValue }
+                    );
+                }
+            }
+        }
 
         await connection.commit();
         res.json({ success: true, message: 'Settings updated successfully' });
     } catch (error) {
         await connection.rollback();
         console.error(error);
-        res.status(500).json({ success: false, message: 'Failed to update settings' });
+        res.status(500).json({ success: false, message: error.message || 'Failed to update settings' });
     } finally {
         connection.release();
+    }
+};
+
+// @desc    Update single setting
+// @route   PATCH /api/settings/:key
+// @access  Private/Admin
+exports.updateSettingByKey = async (req, res) => {
+    const { key } = req.params;
+    const { value } = req.body;
+
+    try {
+        const [oldVal] = await db.query('SELECT setting_value FROM settings WHERE setting_key = ?', [key]);
+        if (oldVal.length === 0) {
+            return res.status(404).json({ success: false, message: 'Setting not found' });
+        }
+
+        const newValue = String(value);
+        await db.query(
+            'UPDATE settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?',
+            [newValue, req.user.id, key]
+        );
+
+        if (oldVal[0].setting_value !== newValue) {
+            await logAction(
+                req.user.id,
+                'settings_updated',
+                'settings',
+                null,
+                { [key]: oldVal[0].setting_value },
+                { [key]: newValue }
+            );
+        }
+
+        res.json({ success: true, message: 'Setting updated successfully' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };

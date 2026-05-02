@@ -40,17 +40,17 @@ const TablesPage = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="flex justify-between items-end">
-        <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-200">
-                <Grid3X3 size={24} />
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 lg:gap-0">
+        <div className="flex items-center gap-3 lg:gap-4">
+            <div className="w-10 h-10 lg:w-12 lg:h-12 bg-indigo-600 rounded-xl lg:rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-200 shrink-0">
+                <Grid3X3 size={20} className="lg:w-6 lg:h-6" />
             </div>
             <div>
-                <h1 className="text-3xl font-black text-slate-900 tracking-tight">Table Setup</h1>
-                <p className="text-slate-500 font-medium italic">Configure dining areas and table numbers</p>
+                <h1 className="text-xl lg:text-3xl font-black text-slate-900 tracking-tight uppercase lg:normal-case">Table Setup</h1>
+                <p className="text-slate-500 font-medium italic text-[10px] lg:text-sm">Configure dining areas and table numbers</p>
             </div>
         </div>
-        <AppButton icon={Plus} size="lg" onClick={() => setShowModal(true)}>Add New Table</AppButton>
+        <AppButton icon={Plus} size="lg" className="w-full sm:w-auto uppercase tracking-widest text-[10px] lg:text-xs font-black" onClick={() => setShowModal(true)}>Add New Table</AppButton>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

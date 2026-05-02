@@ -1,6 +1,8 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
 const { generateInvoiceNo } = require('../utils/invoiceHelper');
+const nayaService = require('../services/nayaAccountService');
+const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
 
 // Helper to generate session number
 const generateSessionNo = () => {
@@ -20,7 +22,7 @@ const getSystemSettings = async (connection) => {
 // @route   POST /api/table-sessions/start
 // @access  Private
 exports.openSession = async (req, res) => {
-    const { table_id, customer_id } = req.body;
+    const { table_id, customer_id, order_type = 'dine_in', waiter_id } = req.body;
     const connection = await db.getConnection();
 
     try {
@@ -33,10 +35,17 @@ exports.openSession = async (req, res) => {
 
         // 2. Create session
         const session_no = generateSessionNo();
+        const sessionUuid = generateUuid();
+        
+        let finalWaiterId = waiter_id || null;
+        if (!finalWaiterId && req.user.role === 'waiter') {
+            finalWaiterId = req.user.id;
+        }
+
         const [result] = await connection.query(
-            `INSERT INTO table_sessions (session_no, table_id, opened_by)
-             VALUES (?, ?, ?)`,
-            [session_no, table_id, req.user.id]
+            `INSERT INTO table_sessions (uuid, session_no, table_id, customer_id, opened_by, order_type, waiter_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [sessionUuid, session_no, table_id, customer_id || null, req.user.id, order_type, finalWaiterId]
         );
         const sessionId = result.insertId;
 
@@ -49,7 +58,7 @@ exports.openSession = async (req, res) => {
         res.status(201).json({ 
             success: true, 
             message: 'Session opened', 
-            data: { id: sessionId, session_no } 
+            data: { id: sessionId, uuid: sessionUuid, session_no } 
         });
 
     } catch (error) {
@@ -92,23 +101,95 @@ exports.addItemsToSession = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const [sessions] = await connection.query('SELECT status FROM table_sessions WHERE id = ?', [sessionId]);
+        const where = buildIdOrUuidWhere('s', sessionId);
+        const [sessions] = await connection.query(`SELECT id, status, waiter_id FROM table_sessions s WHERE ${where.query}`, [where.value]);
         if (sessions.length === 0) throw new Error('Session not found');
+        const sessionInternalId = sessions[0].id;
         if (sessions[0].status !== 'open') throw new Error('Session is not open');
+        
+        let itemWaiterId = sessions[0].waiter_id || null;
+        if (!itemWaiterId && req.user.role === 'waiter') {
+            itemWaiterId = req.user.id;
+        }
 
         for (const itemInput of items) {
-            const [itemData] = await connection.query('SELECT name, price FROM items WHERE id = ?', [itemInput.item_id]);
-            if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id} not found`);
+            let realPrice, realName, comboId = null, itemId = null;
             
-            const realPrice = itemData[0].price;
-            const realName = itemData[0].name;
-            const total = realPrice * itemInput.qty;
+            if (itemInput.is_combo) {
+                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ?', [itemInput.id || itemInput.item_id]);
+                if (comboData.length === 0) throw new Error(`Combo ID ${itemInput.id} not found`);
+                if (comboData[0].status !== 'active') throw new Error(`Combo ${comboData[0].name} is inactive`);
+                
+                // Check components
+                const [components] = await connection.query(
+                    'SELECT i.name, i.availability_status, i.status FROM combo_items ci JOIN items i ON ci.item_id = i.id WHERE ci.combo_id = ?',
+                    [itemInput.id || itemInput.item_id]
+                );
+                for (const comp of components) {
+                    if (comp.status !== 'active') throw new Error(`Component ${comp.name} is inactive`);
+                    if (comp.availability_status !== 'available') throw new Error(`Component ${comp.name} is ${comp.availability_status.replace('_', ' ')}`);
+                }
 
-            await connection.query(
-                `INSERT INTO order_items (session_id, item_id, item_name, qty, unit_price, total, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [sessionId, itemInput.item_id, realName, itemInput.qty, realPrice, total, itemInput.note || null, req.user.id]
+                realPrice = comboData[0].price;
+                realName = comboData[0].name;
+                comboId = itemInput.id || itemInput.item_id;
+            } else {
+                const [itemData] = await connection.query('SELECT name, price, status, availability_status FROM items WHERE id = ?', [itemInput.item_id || itemInput.id]);
+                if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id || itemInput.id} not found`);
+                if (itemData[0].status !== 'active') throw new Error(`Item ${itemData[0].name} is inactive`);
+                if (itemData[0].availability_status !== 'available') {
+                    throw new Error(`Item ${itemData[0].name} is ${itemData[0].availability_status.replace('_', ' ')}`);
+                }
+                
+                realPrice = itemData[0].price;
+                realName = itemData[0].name;
+                itemId = itemInput.item_id || itemInput.id;
+            }
+
+            let modifierTotal = 0;
+            const itemModifiers = [];
+
+            if (itemInput.modifiers && itemInput.modifiers.length > 0) {
+                const modifierIds = itemInput.modifiers.map(m => m.modifier_id || m.id);
+                const [dbModifiers] = await connection.query(
+                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active"',
+                    [modifierIds]
+                );
+
+                for (const dbMod of dbModifiers) {
+                    const priceDelta = parseFloat(dbMod.price_delta || 0);
+                    modifierTotal += priceDelta;
+                    itemModifiers.push({
+                        modifier_id: dbMod.id,
+                        name: dbMod.name,
+                        type: dbMod.type,
+                        price_delta: priceDelta
+                    });
+                }
+            }
+            
+            const itemUnitPrice = realPrice + modifierTotal;
+            const total = itemUnitPrice * itemInput.qty;
+            const itemUuid = generateUuid();
+
+            const [orderItemResult] = await connection.query(
+                `INSERT INTO order_items (uuid, session_id, item_id, combo_id, item_name, qty, unit_price, modifier_total, total, note, special_note, created_by, waiter_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemUuid, sessionInternalId, itemId, comboId, realName, itemInput.qty, realPrice, modifierTotal, total, itemInput.note || null, itemInput.special_note || null, req.user.id, itemWaiterId]
             );
+            const orderItemId = orderItemResult.insertId;
+
+            // Save modifiers
+            if (itemModifiers.length > 0) {
+                for (const mod of itemModifiers) {
+                    const modUuid = generateUuid();
+                    await connection.query(
+                        `INSERT INTO order_item_modifiers (uuid, order_item_id, modifier_id, modifier_name, modifier_type, price_delta)
+                         VALUES (?, ?, ?, ?, ?, ?)`,
+                        [modUuid, orderItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta]
+                    );
+                }
+            }
         }
 
         await connection.commit();
@@ -132,15 +213,39 @@ exports.voidSessionItem = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const [items] = await connection.query('SELECT * FROM order_items WHERE id = ? AND session_id = ?', [order_item_id, sessionId]);
+        if (!reason) throw new Error('Void reason is required');
+
+        const sessionWhere = buildIdOrUuidWhere('s', sessionId);
+        const itemWhere = buildIdOrUuidWhere('oi', order_item_id);
+
+        const [items] = await connection.query(`SELECT oi.* FROM order_items oi JOIN table_sessions s ON oi.session_id = s.id WHERE ${itemWhere.query} AND ${sessionWhere.query}`, [...itemWhere.value, ...sessionWhere.value]);
         if (items.length === 0) throw new Error('Item not found');
 
+        const item = items[0];
+
+        const [settings] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = "cashier_void_limit"');
+        const voidLimit = parseFloat(settings[0]?.setting_value || 2000);
+
+        // Role-based validation
+        const userRole = req.user.role;
+        const isSent = item.kot_sent || item.status === 'served';
+        
+        if (isSent) {
+            if (userRole === 'cashier') {
+                if (parseFloat(item.total) > voidLimit) {
+                    throw new Error(`Cashier can only void items up to Rs. ${voidLimit}. This item (Rs. ${item.total}) requires manager approval.`);
+                }
+            } else if (userRole !== 'admin') {
+                throw new Error('Only admin, manager, or authorized cashier can void an item that has already been sent to the kitchen.');
+            }
+        }
+
         await connection.query(
-            'UPDATE order_items SET status = "voided", note = ? WHERE id = ?',
-            [reason ? `VOIDED: ${reason}` : 'VOIDED', order_item_id]
+            `UPDATE order_items SET status = "voided", void_reason = ?, voided_by = ?, voided_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [reason, req.user.id, item.id]
         );
 
-        await logAction(req.user.id, 'item_voided', 'order_item', order_item_id, items[0], { reason });
+        await logAction(req.user.id, 'order_item_voided', 'order_item', item.id, null, { reason, item_name: item.item_name });
 
         await connection.commit();
         res.json({ success: true, message: 'Item voided' });
@@ -156,13 +261,14 @@ exports.voidSessionItem = async (req, res) => {
 // @desc    Get session details
 exports.getSessionDetails = async (req, res) => {
     try {
+        const where = buildIdOrUuidWhere('s', req.params.id);
         const [sessions] = await db.query(
             `SELECT s.*, t.table_no, c.name as customer_name
              FROM table_sessions s
              LEFT JOIN restaurant_tables t ON s.table_id = t.id
              LEFT JOIN customers c ON s.customer_id = c.id
-             WHERE s.id = ?`,
-            [req.params.id]
+             WHERE ${where.query}`,
+            [where.value]
         );
 
         if (sessions.length === 0) return res.status(404).json({ success: false, message: 'Session not found' });
@@ -173,6 +279,16 @@ exports.getSessionDetails = async (req, res) => {
         );
 
         const session = sessions[0];
+        
+        // Fetch modifiers for each item
+        for (let item of items) {
+            const [itemMods] = await db.query(
+                'SELECT modifier_id as id, modifier_name as name, modifier_type as type, price_delta FROM order_item_modifiers WHERE order_item_id = ?',
+                [item.id]
+            );
+            item.modifiers = itemMods;
+        }
+        
         session.items = items;
 
         res.json({ success: true, data: session });
@@ -200,14 +316,17 @@ exports.payNowCheckout = async (req, res) => {
 
         const settings = await getSystemSettings(connection);
         const invoice_no = await generateInvoiceNo(connection, 'INV');
+        const invoiceUuid = generateUuid();
 
-        const [sessions] = await connection.query('SELECT * FROM table_sessions WHERE id = ? AND status = "open"', [sessionId]);
+        const where = buildIdOrUuidWhere('s', sessionId);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
+        const sessionInternalId = session.id;
 
         const [orderItems] = await connection.query(
             'SELECT * FROM order_items WHERE session_id = ? AND status IN ("active", "served")', 
-            [sessionId]
+            [sessionInternalId]
         );
         if (orderItems.length === 0) throw new Error('No billable items in session');
 
@@ -224,7 +343,7 @@ exports.payNowCheckout = async (req, res) => {
 
         // Check Discount Approval Limit
         const discountLimit = parseFloat(settings.discount_approval_limit || 0);
-        if (discount_amount > discountLimit && !['admin', 'manager'].includes(req.user.role)) {
+        if (discount_amount > discountLimit && req.user.role !== 'admin') {
             throw new Error(`Discount exceeds approval limit (Max: ${settings.currency_symbol || 'Rs.'} ${discountLimit}). Manager override required.`);
         }
         const taxEnabledSetting = settings.tax_enabled === 'true';
@@ -239,13 +358,14 @@ exports.payNowCheckout = async (req, res) => {
 
         const [invoiceResult] = await connection.query(
             `INSERT INTO invoices (
-                invoice_no, customer_id, table_id, session_id, invoice_type, 
+                uuid, invoice_no, customer_id, table_id, session_id, invoice_type, order_type, waiter_id,
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, balance_amount, created_by
-            ) VALUES (?, ?, ?, ?, 'table_sale', 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
             [
-                invoice_no, session.customer_id, session.table_id, sessionId,
+                invoiceUuid,
+                invoice_no, session.customer_id, session.table_id, sessionInternalId, session.order_type || 'dine_in', session.waiter_id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
                 grandTotal, grandTotal, req.user.id
@@ -254,10 +374,11 @@ exports.payNowCheckout = async (req, res) => {
         const invoiceId = invoiceResult.insertId;
 
         for (const p of payments) {
+            const payUuid = generateUuid();
             await connection.query(
-                `INSERT INTO invoice_payments (invoice_id, payment_method, amount, reference_no)
-                 VALUES (?, ?, ?, ?)`,
-                [invoiceId, p.payment_method, p.amount, p.reference_no || null]
+                `INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [payUuid, invoiceId, p.payment_method, p.amount, p.reference_no || null]
             );
         }
 
@@ -272,7 +393,7 @@ exports.payNowCheckout = async (req, res) => {
 
         await connection.query(
             'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', 
-            [req.user.id, sessionId]
+            [req.user.id, sessionInternalId]
         );
         await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
 
@@ -282,7 +403,7 @@ exports.payNowCheckout = async (req, res) => {
         res.status(201).json({ 
             success: true, 
             message: 'Checkout completed', 
-            data: { id: invoiceId, invoice_no, grand_total: grandTotal } 
+            data: { id: invoiceId, uuid: invoiceUuid, invoice_no, grand_total: grandTotal } 
         });
 
     } catch (error) {
@@ -317,9 +438,11 @@ exports.splitBill = async (req, res) => {
         await connection.beginTransaction();
         const settings = await getSystemSettings(connection);
 
-        const [sessions] = await connection.query('SELECT * FROM table_sessions WHERE id = ? AND status = "open"', [sessionId]);
+        const where = buildIdOrUuidWhere('s', sessionId);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
+        const sessionInternalId = session.id;
 
         let billableItems = [];
         let subtotal = 0;
@@ -327,15 +450,15 @@ exports.splitBill = async (req, res) => {
         if (split_type === 'by_items') {
             if (!order_item_ids || order_item_ids.length === 0) throw new Error('No items selected for split');
             const [items] = await connection.query(
-                'SELECT * FROM order_items WHERE id IN (?) AND session_id = ? AND status IN ("active", "served")',
-                [order_item_ids, sessionId]
+                `SELECT * FROM order_items WHERE id IN (?) AND session_id = ? AND status IN ("active", "served")`,
+                [order_item_ids, sessionInternalId]
             );
             billableItems = items;
             subtotal = billableItems.reduce((acc, item) => acc + parseFloat(item.total), 0);
         } else if (split_type === 'equal') {
             const [allItems] = await connection.query(
                 'SELECT SUM(total) as total FROM order_items WHERE session_id = ? AND status IN ("active", "served")',
-                [sessionId]
+                [sessionInternalId]
             );
             const totalToSplit = parseFloat(allItems[0].total || 0);
             subtotal = totalToSplit / (split_count || 1);
@@ -356,7 +479,7 @@ exports.splitBill = async (req, res) => {
 
         // Check Discount Approval Limit
         const discountLimit = parseFloat(settings.discount_approval_limit || 0);
-        if (discount_amount > discountLimit && !['admin', 'manager'].includes(req.user.role)) {
+        if (discount_amount > discountLimit && req.user.role !== 'admin') {
             throw new Error(`Discount exceeds approval limit (Max: ${settings.currency_symbol || 'Rs.'} ${discountLimit}). Manager override required.`);
         }
         const taxEnabledSetting = settings.tax_enabled === 'true';
@@ -370,15 +493,17 @@ exports.splitBill = async (req, res) => {
         const grandTotal = discountedSubtotal + taxAmount + scAmount;
 
         const invoice_no = await generateInvoiceNo(connection, 'SP');
+        const invoiceUuid = generateUuid();
         const [invoiceResult] = await connection.query(
             `INSERT INTO invoices (
-                invoice_no, customer_id, table_id, session_id, invoice_type, 
+                uuid, invoice_no, customer_id, table_id, session_id, invoice_type, order_type, waiter_id,
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, created_by
-            ) VALUES (?, ?, ?, ?, 'table_sale', 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                invoice_no, session.customer_id, session.table_id, sessionId,
+                invoiceUuid,
+                invoice_no, session.customer_id, session.table_id, sessionInternalId, session.order_type || 'dine_in', session.waiter_id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
                 grandTotal, grandTotal, req.user.id
@@ -387,30 +512,33 @@ exports.splitBill = async (req, res) => {
         const invoiceId = invoiceResult.insertId;
 
         for (const p of payments) {
+            const payUuid = generateUuid();
             await connection.query(
-                'INSERT INTO invoice_payments (invoice_id, payment_method, amount, reference_no) VALUES (?, ?, ?, ?)',
-                [invoiceId, p.payment_method, p.amount, p.reference_no || null]
+                'INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no) VALUES (?, ?, ?, ?, ?)',
+                [payUuid, invoiceId, p.payment_method, p.amount, p.reference_no || null]
             );
         }
 
         if (split_type === 'by_items') {
             for (const item of billableItems) {
+                const itemUuid = generateUuid();
                 await connection.query(
-                    'INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, total) VALUES (?, ?, ?, ?, ?, ?)',
-                    [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total]
+                    'INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total]
                 );
                 await connection.query('UPDATE order_items SET status = "billed" WHERE id = ?', [item.id]);
             }
         } else {
+            const itemUuid = generateUuid();
             await connection.query(
-                'INSERT INTO invoice_items (invoice_id, item_name, qty, unit_price, total) VALUES (?, ?, ?, ?, ?)',
-                [invoiceId, `Split Payment (${split_type})`, 1, subtotal, subtotal]
+                'INSERT INTO invoice_items (uuid, invoice_id, item_name, qty, unit_price, total) VALUES (?, ?, ?, ?, ?, ?)',
+                [itemUuid, invoiceId, `Split Payment (${split_type})`, 1, subtotal, subtotal]
             );
         }
 
         const [remainingItems] = await connection.query(
             'SELECT COUNT(*) as count FROM order_items WHERE session_id = ? AND status IN ("active", "served")',
-            [sessionId]
+            [sessionInternalId]
         );
 
         let shouldClose = false;
@@ -419,25 +547,25 @@ exports.splitBill = async (req, res) => {
         } else {
             const [sessionTotals] = await connection.query(
                 'SELECT SUM(total) as total FROM order_items WHERE session_id = ? AND status IN ("active", "served", "billed")',
-                [sessionId]
+                [sessionInternalId]
             );
             const [billedTotals] = await connection.query(
                 'SELECT SUM(subtotal) as total FROM invoices WHERE session_id = ? AND payment_status != "cancelled"',
-                [sessionId]
+                [sessionInternalId]
             );
             const totalNeeded = parseFloat(sessionTotals[0].total || 0);
             const totalBilled = parseFloat(billedTotals[0].total || 0);
             
             if (totalBilled >= totalNeeded - 0.01) {
                 shouldClose = true;
-                await connection.query('UPDATE order_items SET status = "billed" WHERE session_id = ? AND status IN ("active", "served")', [sessionId]);
+                await connection.query('UPDATE order_items SET status = "billed" WHERE session_id = ? AND status IN ("active", "served")', [sessionInternalId]);
             }
         }
 
         if (shouldClose) {
             await connection.query(
                 'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?',
-                [req.user.id, sessionId]
+                [req.user.id, sessionInternalId]
             );
             await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
         }
@@ -445,7 +573,7 @@ exports.splitBill = async (req, res) => {
         await logAction(req.user.id, 'bill_split', 'invoice', invoiceId, null, { split_type, grandTotal });
 
         await connection.commit();
-        res.status(201).json({ success: true, message: 'Split bill processed', data: { id: invoiceId, invoice_no, shouldClose } });
+        res.status(201).json({ success: true, message: 'Split bill processed', data: { id: invoiceId, uuid: invoiceUuid, invoice_no, shouldClose } });
     } catch (error) {
         await connection.rollback();
         console.error('Split Bill Error:', error);
@@ -473,17 +601,20 @@ exports.addToCreditCheckout = async (req, res) => {
 
         const settings = await getSystemSettings(connection);
         const invoice_no = await generateInvoiceNo(connection, 'INV');
+        const invoiceUuid = generateUuid();
 
-        const [sessions] = await connection.query('SELECT * FROM table_sessions WHERE id = ? AND status = "open"', [sessionId]);
+        const where = buildIdOrUuidWhere('s', sessionId);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
+        const sessionInternalId = session.id;
 
         const finalCustomerId = customer_id || session.customer_id;
         if (!finalCustomerId) throw new Error('Customer required for credit checkout');
 
         const [orderItems] = await connection.query(
             'SELECT * FROM order_items WHERE session_id = ? AND status IN ("active", "served")', 
-            [sessionId]
+            [sessionInternalId]
         );
         if (orderItems.length === 0) throw new Error('No billable items in session');
 
@@ -500,7 +631,7 @@ exports.addToCreditCheckout = async (req, res) => {
 
         // Check Discount Approval Limit
         const discountLimit = parseFloat(settings.discount_approval_limit || 0);
-        if (discount_amount > discountLimit && !['admin', 'manager'].includes(req.user.role)) {
+        if (discount_amount > discountLimit && req.user.role !== 'admin') {
             throw new Error(`Discount exceeds approval limit (Max: ${settings.currency_symbol || 'Rs.'} ${discountLimit}). Manager override required.`);
         }
         const taxEnabledSetting = settings.tax_enabled === 'true';
@@ -513,15 +644,22 @@ exports.addToCreditCheckout = async (req, res) => {
         const scAmount = (discountedSubtotal * scRate) / 100;
         const grandTotal = discountedSubtotal + taxAmount + scAmount;
 
+        // Validate credit limit before proceeding
+        await nayaService.validateCreditLimit(connection, {
+            customerId: finalCustomerId,
+            amount: grandTotal
+        });
+
         const [invoiceResult] = await connection.query(
             `INSERT INTO invoices (
-                invoice_no, customer_id, table_id, session_id, invoice_type, 
+                uuid, invoice_no, customer_id, table_id, session_id, invoice_type, order_type, waiter_id,
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, balance_amount, created_by
-            ) VALUES (?, ?, ?, ?, 'table_sale', 'unpaid', 'credit', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'unpaid', 'credit', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
             [
-                invoice_no, finalCustomerId, session.table_id, sessionId,
+                invoiceUuid,
+                invoice_no, finalCustomerId, session.table_id, sessionInternalId, session.order_type || 'dine_in', session.waiter_id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
                 grandTotal, grandTotal, req.user.id
@@ -529,14 +667,12 @@ exports.addToCreditCheckout = async (req, res) => {
         );
         const invoiceId = invoiceResult.insertId;
 
-        await connection.query('UPDATE customers SET current_balance = current_balance + ? WHERE id = ?', [grandTotal, finalCustomerId]);
-        const [customer] = await connection.query('SELECT current_balance FROM customers WHERE id = ?', [finalCustomerId]);
-        
-        await connection.query(
-            `INSERT INTO customer_ledger (customer_id, invoice_id, type, amount, balance_after, description)
-             VALUES (?, ?, 'debit', ?, ?, ?)`,
-            [finalCustomerId, invoiceId, grandTotal, customer[0].current_balance, `Credit checkout - Inv: ${invoice_no}`]
-        );
+        const nayaResult = await nayaService.createCreditInvoiceForCustomer(connection, {
+            customerId: finalCustomerId,
+            invoiceId: invoiceId,
+            amount: grandTotal,
+            description: `Table bill added to Naya Book - Inv: ${invoice_no}`
+        });
 
         for (const item of orderItems) {
             await connection.query(
@@ -549,7 +685,7 @@ exports.addToCreditCheckout = async (req, res) => {
 
         await connection.query(
             'UPDATE table_sessions SET status = "credit", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', 
-            [req.user.id, sessionId]
+            [req.user.id, sessionInternalId]
         );
         await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
 
@@ -559,7 +695,7 @@ exports.addToCreditCheckout = async (req, res) => {
         res.status(201).json({ 
             success: true, 
             message: 'Credit checkout completed', 
-            data: { id: invoiceId, invoice_no, grand_total: grandTotal } 
+            data: { id: invoiceId, uuid: invoiceUuid, invoice_no, grand_total: grandTotal } 
         });
 
     } catch (error) {
@@ -594,15 +730,18 @@ exports.updateSessionItem = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const [items] = await connection.query('SELECT unit_price FROM order_items WHERE id = ? AND session_id = ?', [itemId, sessionId]);
+        const sessionWhere = buildIdOrUuidWhere('s', sessionId);
+        const itemWhere = buildIdOrUuidWhere('oi', itemId);
+
+        const [items] = await connection.query(`SELECT oi.unit_price FROM order_items oi JOIN table_sessions s ON oi.session_id = s.id WHERE ${itemWhere.query} AND ${sessionWhere.query}`, [...itemWhere.value, ...sessionWhere.value]);
         if (items.length === 0) throw new Error('Item not found in session');
 
         const unitPrice = items[0].unit_price;
         const total = unitPrice * qty;
 
         await connection.query(
-            'UPDATE order_items SET qty = ?, total = ?, note = ? WHERE id = ?',
-            [qty, total, note, itemId]
+            `UPDATE order_items SET qty = ?, total = ?, note = ? WHERE ${itemWhere.query}`,
+            [qty, total, note, ...itemWhere.value]
         );
 
         await connection.commit();
@@ -611,6 +750,96 @@ exports.updateSessionItem = async (req, res) => {
         await connection.rollback();
         console.error(error);
         res.status(500).json({ success: false, message: error.message || 'Server error' });
+    } finally {
+        connection.release();
+    }
+};
+
+// @desc    Transfer Table
+// @route   POST /api/table-sessions/:id/transfer
+// @access  Private
+exports.transferTable = async (req, res) => {
+    const sessionId = req.params.id;
+    const { target_table_id } = req.body;
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const where = buildIdOrUuidWhere('s', sessionId);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        if (sessions.length === 0) throw new Error('Active session not found');
+        const session = sourceSession = sessions[0];
+        const sessionInternalId = session.id;
+        
+        if (session.table_id == target_table_id) throw new Error('Target table is the same as source table');
+
+        const [tables] = await connection.query('SELECT status FROM restaurant_tables WHERE id = ?', [target_table_id]);
+        if (tables.length === 0) throw new Error('Target table not found');
+        if (tables[0].status !== 'available') throw new Error('Target table is not available');
+
+        // Update session
+        await connection.query('UPDATE table_sessions SET table_id = ? WHERE id = ?', [target_table_id, sessionInternalId]);
+        
+        // Update table statuses
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
+        await connection.query('UPDATE restaurant_tables SET status = "occupied" WHERE id = ?', [target_table_id]);
+
+        await logAction(req.user.id, 'table_transferred', 'table_session', sessionInternalId, null, { from_table: session.table_id, to_table: target_table_id });
+
+        await connection.commit();
+        res.json({ success: true, message: 'Table transferred successfully' });
+    } catch (error) {
+        await connection.rollback();
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message || 'Transfer failed' });
+    } finally {
+        connection.release();
+    }
+};
+
+// @desc    Merge Table
+// @route   POST /api/table-sessions/:id/merge
+// @access  Private
+exports.mergeTable = async (req, res) => {
+    const sourceSessionId = req.params.id;
+    const { target_table_id } = req.body;
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const where = buildIdOrUuidWhere('s', sourceSessionId);
+        const [sourceSessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        if (sourceSessions.length === 0) throw new Error('Source session not found or not open');
+        const sourceSession = sourceSessions[0];
+
+        const [targetSessions] = await connection.query('SELECT * FROM table_sessions WHERE table_id = ? AND status = "open"', [target_table_id]);
+        if (targetSessions.length === 0) throw new Error('Target table does not have an open session. Use transfer instead.');
+        const targetSession = targetSessions[0];
+
+        if (sourceSession.id === targetSession.id) throw new Error('Source and target sessions are the same');
+
+        // Move active order_items
+        await connection.query('UPDATE order_items SET session_id = ? WHERE session_id = ? AND status != "billed"', [targetSession.id, sourceSession.id]);
+
+        // Move kot_orders
+        await connection.query('UPDATE kot_orders SET session_id = ?, table_id = ? WHERE session_id = ?', [targetSession.id, target_table_id, sourceSession.id]);
+
+        // Close source session
+        await connection.query('UPDATE table_sessions SET status = "merged", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', [req.user.id, sourceSession.id]);
+        
+        // Free source table
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [sourceSession.table_id]);
+
+        await logAction(req.user.id, 'table_merged', 'table_session', sourceSession.id, null, { merged_into: targetSession.id, source_table: sourceSession.table_id, target_table: target_table_id });
+
+        await connection.commit();
+        res.json({ success: true, message: 'Tables merged successfully' });
+    } catch (error) {
+        await connection.rollback();
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message || 'Merge failed' });
     } finally {
         connection.release();
     }

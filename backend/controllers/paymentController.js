@@ -1,4 +1,6 @@
 const { db } = require('../config/db');
+const nayaService = require('../services/nayaAccountService');
+const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
 
 // @desc    Add customer payment
 // @route   POST /api/payments/customer-payment
@@ -10,46 +12,53 @@ exports.addPayment = async (req, res) => {
     try {
         await connection.beginTransaction();
 
+        const paymentAmount = parseFloat(amount);
+        if (!paymentAmount || paymentAmount <= 0) throw new Error('Invalid payment amount');
+
         // 1. Get customer
-        const [customers] = await connection.query('SELECT * FROM customers WHERE id = ?', [customer_id]);
+        const where = buildIdOrUuidWhere(null, customer_id);
+        const [customers] = await connection.query(`SELECT id FROM customers WHERE ${where.query}`, [where.value]);
         if (customers.length === 0) throw new Error('Customer not found');
         const customer = customers[0];
+        const actualCustomerId = customer.id;
 
         // 2. Insert payment
+        const uuid = generateUuid();
         const [paymentResult] = await connection.query(
-            `INSERT INTO payments (customer_id, amount, payment_method, note, created_by)
-             VALUES (?, ?, ?, ?, ?)`,
-            [customer_id, parseFloat(amount), payment_method, note || '', req.user.id]
+            `INSERT INTO payments (uuid, customer_id, amount, payment_method, note, created_by)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [uuid, actualCustomerId, paymentAmount, payment_method, note || '', req.user.id]
         );
         const paymentId = paymentResult.insertId;
 
-        // 3. Update customer balance
-        const newBalance = customer.current_balance - parseFloat(amount);
-        await connection.query('UPDATE customers SET current_balance = ? WHERE id = ?', [newBalance, customer_id]);
+        // 3. Naya Integration
+        const nayaResult = await nayaService.receiveCustomerPayment(connection, {
+            customerId: actualCustomerId,
+            paymentId: paymentId,
+            amount: paymentAmount,
+            description: `Customer payment received via ${payment_method}${note ? ' - ' + note : ''}`
+        });
 
-        // 4. Insert ledger record
-        await connection.query(
-            `INSERT INTO customer_ledger (customer_id, payment_id, type, amount, balance_after, description)
-             VALUES (?, ?, 'credit', ?, ?, ?)`,
-            [
-                customer_id, 
-                paymentId, 
-                parseFloat(amount), 
-                newBalance, 
-                `Payment received. Method: ${payment_method}`
-            ]
-        );
+        const { logAction } = require('../utils/logger');
+        await logAction(req.user.id, 'customer_payment_received', 'customer', actualCustomerId, { old_balance: nayaResult.previousBalance }, { payment_id: paymentId, uuid, amount: paymentAmount, new_balance: nayaResult.newBalance });
 
         await connection.commit();
         res.status(201).json({ 
             success: true, 
-            message: 'Payment added successfully', 
-            data: { newBalance } 
+            message: 'Payment recorded successfully', 
+            data: { 
+                payment_id: paymentId,
+                uuid: uuid,
+                customer_id: actualCustomerId,
+                paid_amount: paymentAmount,
+                previous_balance: nayaResult.previousBalance,
+                new_balance: nayaResult.newBalance 
+            } 
         });
 
     } catch (error) {
         await connection.rollback();
-        console.error(error);
+        console.error('Add Payment Error:', error);
         res.status(500).json({ success: false, message: error.message || 'Failed to add payment' });
     } finally {
         connection.release();
@@ -61,9 +70,15 @@ exports.addPayment = async (req, res) => {
 // @access  Private
 exports.getCustomerPayments = async (req, res) => {
     try {
+        const where = buildIdOrUuidWhere(null, req.params.customerId);
+        // First get the customer ID if it's a UUID
+        const [customerRows] = await db.query(`SELECT id FROM customers WHERE ${where.query}`, [where.value]);
+        if (customerRows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
+        const customerId = customerRows[0].id;
+
         const [payments] = await db.query(
             'SELECT * FROM payments WHERE customer_id = ? ORDER BY created_at DESC', 
-            [req.params.customerId]
+            [customerId]
         );
         res.json({ success: true, data: payments });
     } catch (error) {

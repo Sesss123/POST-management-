@@ -28,12 +28,17 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (email, password) => {
-    const { data } = await apiClient.post('/auth/login', { email, password });
-    if (data.success) {
-      setUser(data.data);
-      localStorage.setItem('token', data.data.token);
-      localStorage.setItem('user', JSON.stringify(data.data));
+    try {
+      const { data } = await apiClient.post('/auth/login', { email, password });
+      if (data.success) {
+        setUser(data.data);
+        localStorage.setItem('token', data.data.token);
+        localStorage.setItem('user', JSON.stringify(data.data));
+        return data;
+      }
       return data;
+    } catch (error) {
+      throw error;
     }
   };
 
