@@ -18,9 +18,12 @@ import {
   History,
   CheckCircle,
   X,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 import { AppButton, AppCard, AppModal, useToast, StatusBadge } from '../components/ui';
+import { gatewayPaymentApi } from '../api/api';
+import PaymentQRModal from '../components/PaymentQRModal';
 import { cn } from '../utils/cn';
 
 const HeldBillsPage = () => {
@@ -37,6 +40,8 @@ const HeldBillsPage = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrTransactionData, setQrTransactionData] = useState(null);
 
   useEffect(() => {
     fetchBills();
@@ -93,6 +98,35 @@ const HeldBillsPage = () => {
     } finally {
       setProcessing(false);
     }
+  };
+  
+  const handleQRPayment = async () => {
+      setProcessing(true);
+      try {
+          const payload = {
+              held_bill_id: selectedBill.uuid || selectedBill.id,
+              items: billItems.map(i => ({ 
+                  item_id: i.item_id, 
+                  qty: i.qty,
+                  price: i.unit_price
+              })),
+              discount_type: selectedBill.discount_type || 'fixed',
+              discount_value: selectedBill.discount_value || 0,
+              promotion_id: selectedBill.promotion_id || null,
+              customer_id: selectedBill.customer_id || null,
+              order_type: selectedBill.order_type || 'takeaway',
+              source: 'held_bill'
+          };
+          
+          const res = await gatewayPaymentApi.createQR(payload);
+          setQrTransactionData(res.data.data);
+          setShowQRModal(true);
+          setShowDetailsModal(false);
+      } catch (err) {
+          toast.error(err.response?.data?.message || 'Failed to create QR payment');
+      } finally {
+          setProcessing(false);
+      }
   };
 
   const statusColors = {
@@ -319,6 +353,15 @@ const HeldBillsPage = () => {
                             >
                                 Resume To Cart
                             </AppButton>
+                            <AppButton 
+                                variant="secondary" 
+                                className="w-full py-4 rounded-[32px] bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-all" 
+                                icon={Zap}
+                                loading={processing}
+                                onClick={handleQRPayment}
+                            >
+                                Pay via QR
+                            </AppButton>
                             <button 
                                 onClick={() => setShowCancelModal(true)}
                                 className="w-full py-3 text-rose-500 font-black text-[10px] uppercase tracking-[0.2em] hover:text-rose-700 transition-colors"
@@ -370,6 +413,20 @@ const HeldBillsPage = () => {
             </div>
         </div>
       </AppModal>
+
+      <PaymentQRModal 
+            isOpen={showQRModal}
+            onClose={() => setShowQRModal(false)}
+            transactionData={qrTransactionData}
+            onSuccess={(data) => {
+                setShowQRModal(false);
+                toast.success('QR Payment Successful!');
+                fetchBills();
+            }}
+            onCancel={() => {
+                setProcessing(false);
+            }}
+        />
     </div>
   );
 };

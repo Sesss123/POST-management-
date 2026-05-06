@@ -24,10 +24,15 @@ const A4InvoiceTemplate = ({ invoice }) => {
     balance_amount,
     payment_method,
     payment_status,
+    currency_code,
+    currency_symbol,
+    tax_name,
+    tax_inclusive,
     settings
   } = invoice;
 
-  const currency = settings?.currency_symbol || 'Rs.';
+  const currency = currency_symbol || settings?.currency_symbol || 'Rs.';
+  const taxName = tax_name || settings?.tax_name || 'Tax';
 
   return (
     <div className="a4-invoice-template bg-white text-slate-900 font-sans p-8 max-w-[210mm] mx-auto min-h-[297mm] shadow-lg">
@@ -163,7 +168,7 @@ const A4InvoiceTemplate = ({ invoice }) => {
           
           {parseFloat(tax_amount) > 0 && (
             <div className="flex justify-between text-slate-500 font-bold text-sm">
-              <span>Tax ({tax_rate}%)</span>
+              <span>{taxName} ({tax_rate}%){tax_inclusive ? ' [Inclusive]' : ''}</span>
               <span>{currency} {parseFloat(tax_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             </div>
           )}

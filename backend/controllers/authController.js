@@ -2,11 +2,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { db } = require('../config/db');
 
-const generateToken = (id, role) => {
+const generateToken = (id, role, shopId) => {
     if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
         console.warn('WARNING: JWT_SECRET is not set or is less than 32 characters. This is a security risk!');
     }
-    return jwt.sign({ id, role }, process.env.JWT_SECRET, {
+    return jwt.sign({ id, role, shopId }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRES_IN || '1d'
     });
 };
@@ -21,7 +21,20 @@ exports.login = async (req, res) => {
     const userAgent = req.headers['user-agent'];
 
     try {
-        const [users] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+        const [users] = await db.query(`
+            SELECT u.*, 
+                   s.status as shop_status, 
+                   s.name as shop_name, 
+                   s.identifier as shop_identifier,
+                   s.subscription_status,
+                   s.subscription_end_date,
+                   s.grace_until,
+                   s.trial_ends_at,
+                   s.subscription_plan
+            FROM users u
+            LEFT JOIN shops s ON u.shop_id = s.id
+            WHERE u.email = ?
+        `, [email]);
         const user = users[0];
 
         if (!user) {
@@ -45,7 +58,15 @@ exports.login = async (req, res) => {
                 ipAddress,
                 userAgent
             });
-            return res.status(403).json({ success: false, message: 'Account is deactivated. Please contact administrator.' });
+            return res.status(403).json({ success: false, message: 'Account is deactivated.' });
+        }
+
+        // Check if shop is active (for non-super_admin)
+        if (user.role !== 'super_admin' && user.shop_status !== 'active') {
+            return res.status(403).json({ 
+                success: false, 
+                message: `Restaurant account is ${user.shop_status || 'not found'}. Access denied.` 
+            });
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
@@ -65,10 +86,16 @@ exports.login = async (req, res) => {
             userId: user.id,
             action: 'login_success',
             entityType: 'user',
-            newValue: { email, role: user.role },
+            newValue: { email, role: user.role, shopId: user.shop_id },
             ipAddress,
             userAgent
         });
+
+        // Update last login info
+        await db.query(
+            'UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?',
+            [ipAddress, user.id]
+        );
 
         res.json({
             success: true,
@@ -77,7 +104,15 @@ exports.login = async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                token: generateToken(user.id, user.role)
+                shopId: user.shop_id,
+                shopName: user.shop_name,
+                shopIdentifier: user.shop_identifier,
+                subscriptionStatus: user.subscription_status || 'active',
+                subscriptionEndDate: user.subscription_end_date || null,
+                gracePeriodUntil: user.grace_until || null,
+                trialEndsAt: user.trial_ends_at || null,
+                subscriptionPlan: user.subscription_plan || 'standard',
+                token: generateToken(user.id, user.role, user.shop_id)
             }
         });
     } catch (error) {
@@ -91,11 +126,33 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
     try {
-        const [users] = await db.query('SELECT id, name, email, role, status FROM users WHERE id = ?', [req.user.id]);
+        const [users] = await db.query(`
+            SELECT u.id, u.name, u.email, u.role, u.status, u.shop_id, 
+                   s.name as shop_name, s.identifier as shop_identifier,
+                   s.subscription_status, s.subscription_end_date, s.grace_until, s.trial_ends_at, s.subscription_plan
+            FROM users u
+            LEFT JOIN shops s ON u.shop_id = s.id
+            WHERE u.id = ?
+        `, [req.user.id]);
         const user = users[0];
 
         if (user) {
-            res.json({ success: true, data: user });
+            const formattedUser = {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                status: user.status,
+                shopId: user.shop_id,
+                shopName: user.shop_name,
+                shopIdentifier: user.shop_identifier,
+                subscriptionStatus: user.subscription_status,
+                subscriptionEndDate: user.subscription_end_date,
+                gracePeriodUntil: user.grace_until,
+                trialEndsAt: user.trial_ends_at,
+                subscriptionPlan: user.subscription_plan
+            };
+            res.json({ success: true, data: formattedUser });
         } else {
             res.status(404).json({ success: false, message: 'User not found' });
         }

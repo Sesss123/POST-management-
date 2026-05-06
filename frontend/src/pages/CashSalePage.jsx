@@ -23,12 +23,15 @@ import {
   List,
   Star,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 import { AppButton, AppCard, FormInput, AppModal, useToast } from '../components/ui';
 import InvoicePrintModal from '../components/invoice/InvoicePrintModal';
 import AddToCustomerAccountModal from '../components/naya/AddToCustomerAccountModal';
 import ItemModifierModal from '../components/pos/ItemModifierModal';
+import PaymentQRModal from '../components/PaymentQRModal';
+import { gatewayPaymentApi } from '../api/api';
 import { cn } from '../utils/cn';
 
 const toNumber = (value, fallback = 0) => {
@@ -50,6 +53,10 @@ const CashSalePage = () => {
   const [currentShift, setCurrentShift] = useState(null);
   const [cashReceived, setCashReceived] = useState(0);
   
+  // Loyalty State
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [loyaltyPointsRedeem, setLoyaltyPointsRedeem] = useState(0);
+  
   const [promotions, setPromotions] = useState([]);
   const [selectedPromo, setSelectedPromo] = useState(null);
   const [combos, setCombos] = useState([]);
@@ -69,10 +76,13 @@ const CashSalePage = () => {
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showHeldBillsModal, setShowHeldBillsModal] = useState(false);
   const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showCustomerSelectModal, setShowCustomerSelectModal] = useState(false);
   const [showAddToNayaModal, setShowAddToNayaModal] = useState(false);
   const [heldBills, setHeldBills] = useState([]);
   const [lastInvoice, setLastInvoice] = useState(null);
   const [showQuickCashModal, setShowQuickCashModal] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrTransactionData, setQrTransactionData] = useState(null);
   
   // Held Bill Pro State
   const [resumedBill, setResumedBill] = useState(null);
@@ -152,7 +162,11 @@ const CashSalePage = () => {
       return 0;
   };
   const promoDiscount = getPromoDiscount();
-  const finalSubtotal = Math.max(0, discountedSubtotal - promoDiscount);
+  const preLoyaltySubtotal = Math.max(0, discountedSubtotal - promoDiscount);
+  const loyaltyRate = parseFloat(settings.loyalty_redeem_points || 1);
+  const loyaltyValue = parseFloat(settings.loyalty_redeem_amount || 1);
+  const loyaltyDiscountAmount = Math.min(preLoyaltySubtotal, (toNumber(loyaltyPointsRedeem) / loyaltyRate) * loyaltyValue);
+  const finalSubtotal = Math.max(0, preLoyaltySubtotal - loyaltyDiscountAmount);
 
   const tax = (finalSubtotal * toNumber(settings.tax_rate)) / 100;
   const sc = (finalSubtotal * toNumber(settings.service_charge_rate)) / 100;
@@ -271,8 +285,20 @@ const CashSalePage = () => {
         payment_method: paymentMethod,
         order_type: orderType,
         waiter_id: selectedWaiter || null,
-        cash_received: paymentMethod === 'cash' ? toNumber(cashReceived) : grandTotal
+        cash_received: paymentMethod === 'cash' ? toNumber(cashReceived) : grandTotal,
+        customer_id: selectedCustomer?.id || null,
+        loyalty_points_redeem: loyaltyPointsRedeem,
+        session_id: resumedBill?.session_id || null, // If it's a table session bill
+        held_bill_id: resumedBill?.id || null
       };
+
+      if (paymentMethod === 'qr') {
+          const res = await gatewayPaymentApi.createQR(payload);
+          setQrTransactionData(res.data.data);
+          setShowQRModal(true);
+          setProcessing(false);
+          return;
+      }
 
       let res;
       if (resumedBill) {
@@ -288,6 +314,8 @@ const CashSalePage = () => {
       setCart([]);
       setDiscount(0);
       setCashReceived(0);
+      setSelectedCustomer(null);
+      setLoyaltyPointsRedeem(0);
       setResumedBill(null); // Clear resumed state
       toast.success(resumedBill ? `Held bill ${resumedBill.hold_no} completed!` : 'Sale completed successfully!');
     } catch (err) {
@@ -331,7 +359,14 @@ const CashSalePage = () => {
     setShowAccountModal(true);
   };
 
-  const handleAccountConfirm = async (customerId) => {
+  const handleCustomerSelect = (customer) => {
+    setSelectedCustomer(customer);
+    setShowCustomerSelectModal(false);
+    toast.success(`Customer ${customer.name} selected`);
+  };
+
+  const handleAccountConfirm = async (customer) => {
+    const customerId = customer.id;
     setProcessing(true);
     try {
         const payload = {
@@ -349,7 +384,8 @@ const CashSalePage = () => {
             discount_type: 'fixed',
             discount_value: discount,
             order_type: orderType,
-            payment_method: 'credit'
+            payment_method: 'credit',
+            loyalty_points_redeem: loyaltyPointsRedeem
         };
 
         let res;
@@ -670,8 +706,8 @@ const CashSalePage = () => {
             {viewMode === 'grid' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 {filteredItems.map(item => {
-                  const isAvailable = item.availability_status === 'available' || item.is_combo;
-                  const isSoldOut = item.availability_status === 'sold_out' && !item.is_combo;
+                  const isAvailable = (item.availability_status === 'available' || item.is_combo) && (!item.track_stock || item.stock_qty > 0);
+                  const isSoldOut = (item.availability_status === 'sold_out' || (item.track_stock && item.stock_qty <= 0)) && !item.is_combo;
     
                   return (
                     <button
@@ -685,7 +721,7 @@ const CashSalePage = () => {
                               : "bg-slate-50 border-slate-100 opacity-60 grayscale cursor-not-allowed"
                       )}
                     >
-                      {item.is_popular && !isSoldOut && (
+                      {!!item.is_popular && !isSoldOut && (
                           <div className="absolute top-0 right-0 p-1">
                               <Star size={10} className="text-amber-500 fill-amber-500" />
                           </div>
@@ -699,14 +735,22 @@ const CashSalePage = () => {
                       <div className="flex-1">
                         <div className="flex justify-between items-start gap-1 mb-1">
                             <h4 className="font-black text-slate-800 text-[11px] leading-tight line-clamp-2 uppercase">{item.name}</h4>
-                            {item.short_code && (
+                            {!!item.short_code && item.short_code !== "0" && (
                                 <span className="bg-slate-100 text-slate-500 px-1 py-0.5 rounded text-[7px] font-black shrink-0">{item.short_code}</span>
                             )}
                         </div>
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1 items-center">
                             <span className="text-[7px] font-black text-slate-400 uppercase">{item.category}</span>
                             {item.portion_type && item.portion_type !== 'regular' && (
                                 <span className="text-[7px] font-black text-indigo-500 uppercase px-1 bg-indigo-50 rounded">{item.portion_type}</span>
+                            )}
+                            {!!item.track_stock && (
+                                <span className={cn(
+                                    "text-[7px] font-black px-1 rounded uppercase",
+                                    item.stock_qty <= 0 ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-600"
+                                )}>
+                                    Stock: {item.stock_qty}
+                                </span>
                             )}
                         </div>
                       </div>
@@ -741,7 +785,7 @@ const CashSalePage = () => {
                                 <div className="flex-1 text-left">
                                     <div className="flex items-center gap-2">
                                         <h4 className="font-black text-slate-800 text-xs uppercase">{item.name}</h4>
-                                        {item.short_code && <span className="text-[8px] font-black text-slate-400 bg-slate-100 px-1 rounded">{item.short_code}</span>}
+                                        {!!item.short_code && item.short_code !== "0" && <span className="text-[8px] font-black text-slate-400 bg-slate-100 px-1 rounded">{item.short_code}</span>}
                                     </div>
                                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{item.category} • {item.portion_type}</p>
                                 </div>
@@ -824,18 +868,44 @@ const CashSalePage = () => {
                 <UtensilsCrossed size={14} /> Dine-In
             </button>
         </div>
-        <div className="px-4 py-2 border-b border-slate-100 bg-white flex items-center gap-2 shrink-0">
-            <UserCircle size={14} className="text-slate-400" />
-            <select 
-                className="w-full text-[10px] font-black text-slate-500 uppercase tracking-widest outline-none bg-transparent py-1 cursor-pointer"
-                value={selectedWaiter}
-                onChange={(e) => setSelectedWaiter(e.target.value)}
+        <div className="px-4 py-2 border-b border-slate-100 bg-white flex items-center gap-4 shrink-0 overflow-x-auto">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+                <UserCircle size={14} className="text-slate-400" />
+                <select 
+                    className="w-full text-[10px] font-black text-slate-500 uppercase tracking-widest outline-none bg-transparent py-1 cursor-pointer truncate"
+                    value={selectedWaiter}
+                    onChange={(e) => setSelectedWaiter(e.target.value)}
+                >
+                    <option value="">Select Waiter</option>
+                    {waiters.map(w => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                </select>
+            </div>
+            <div className="h-4 w-px bg-slate-200 shrink-0" />
+            <button 
+                onClick={() => setShowCustomerSelectModal(true)}
+                className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all shrink-0",
+                    selectedCustomer ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-400 hover:bg-slate-50"
+                )}
             >
-                <option value="">Select Waiter (Optional)</option>
-                {waiters.map(w => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                ))}
-            </select>
+                <User size={14} />
+                <span className="text-[10px] font-black uppercase tracking-widest">
+                    {selectedCustomer ? selectedCustomer.name : "Select Customer"}
+                </span>
+                {selectedCustomer && (
+                    <X 
+                        size={12} 
+                        className="ml-1 hover:text-rose-500" 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCustomer(null);
+                            setLoyaltyPointsRedeem(0);
+                        }} 
+                    />
+                )}
+            </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
@@ -923,10 +993,56 @@ const CashSalePage = () => {
                 <span className="text-slate-600">Rs. {(tax + sc).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             </div>
 
-            {(toNumber(discount) > 0 || promoDiscount > 0) && (
-                <div className="flex justify-between text-[9px] font-black text-rose-500 uppercase tracking-widest bg-rose-50/50 p-1 rounded-lg">
-                    <span>Total Discounts</span>
-                    <span>- Rs. {(toNumber(discount) + promoDiscount).toLocaleString()}</span>
+            {(toNumber(discount) > 0 || promoDiscount > 0 || loyaltyDiscountAmount > 0) && (
+                <div className="flex flex-col gap-1 bg-rose-50/50 p-1.5 rounded-lg border border-rose-100">
+                    {(toNumber(discount) > 0 || promoDiscount > 0) && (
+                        <div className="flex justify-between text-[9px] font-black text-rose-500 uppercase tracking-widest">
+                            <span>Discounts & Promos</span>
+                            <span>- Rs. {(toNumber(discount) + promoDiscount).toLocaleString()}</span>
+                        </div>
+                    )}
+                    {loyaltyDiscountAmount > 0 && (
+                        <div className="flex justify-between text-[9px] font-black text-indigo-600 uppercase tracking-widest">
+                            <span>Loyalty Redemption</span>
+                            <span>- Rs. {loyaltyDiscountAmount.toLocaleString()}</span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {selectedCustomer && (
+                <div className="p-2.5 bg-indigo-600 rounded-2xl text-white space-y-2 shadow-lg shadow-indigo-100 animate-in slide-in-from-bottom-2">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <Star size={14} className="text-amber-400 fill-amber-400" />
+                            <span className="text-[10px] font-black uppercase tracking-widest">Loyalty Points</span>
+                        </div>
+                        <span className="text-sm font-black">{parseFloat(selectedCustomer.loyalty_points || 0).toFixed(0)} Pts</span>
+                    </div>
+                    <div className="flex gap-2">
+                        <input 
+                            type="number" 
+                            placeholder="Points to redeem..."
+                            className="flex-1 bg-white/20 border-none rounded-xl px-3 py-1.5 text-xs font-black placeholder:text-white/40 outline-none focus:bg-white/30"
+                            value={loyaltyPointsRedeem || ''}
+                            onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                if (val > parseFloat(selectedCustomer.loyalty_points)) return;
+                                setLoyaltyPointsRedeem(val);
+                            }}
+                        />
+                        <button 
+                            onClick={() => setLoyaltyPointsRedeem(parseFloat(selectedCustomer.loyalty_points))}
+                            className="px-3 py-1.5 bg-white text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                        >
+                            Max
+                        </button>
+                    </div>
+                    {loyaltyDiscountAmount > 0 && (
+                        <p className="text-[9px] font-bold text-center text-white/80 uppercase">
+                            Discount: Rs. {loyaltyDiscountAmount.toLocaleString()}
+                        </p>
+                    )}
                 </div>
             )}
 
@@ -954,6 +1070,15 @@ const CashSalePage = () => {
                 )}
             >
                 <CreditCard size={14} /> Card
+            </button>
+            <button 
+                onClick={() => setPaymentMethod('qr')}
+                className={cn(
+                    "flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all font-black text-[9px] uppercase tracking-widest",
+                    paymentMethod === 'qr' ? "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-100" : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
+                )}
+            >
+                <Zap size={14} /> QR Pay
             </button>
           </div>
 
@@ -1125,11 +1250,41 @@ const CashSalePage = () => {
           onRestore={handleRestoreCart}
         />
 
+        <PaymentQRModal 
+            isOpen={showQRModal}
+            onClose={() => setShowQRModal(false)}
+            transactionData={qrTransactionData}
+            onSuccess={(data) => {
+                setShowQRModal(false);
+                setLastInvoice({ id: qrTransactionData.invoice_id, invoice_no: qrTransactionData.invoice_no });
+                setShowPrintModal(true);
+                setCart([]);
+                setDiscount(0);
+                setCashReceived(0);
+                setResumedBill(null);
+                toast.success('QR Payment Successful!');
+            }}
+            onCancel={() => {
+                setProcessing(false);
+            }}
+        />
+
         <AddToCustomerAccountModal 
         isOpen={showAccountModal}
         onClose={() => setShowAccountModal(false)}
         onConfirm={handleAccountConfirm}
         grandTotal={grandTotal}
+        billAmount={grandTotal}
+      />
+
+      <AddToCustomerAccountModal 
+        isOpen={showCustomerSelectModal}
+        onClose={() => setShowCustomerSelectModal(false)}
+        onConfirm={handleCustomerSelect}
+        billAmount={grandTotal}
+        title="Select Customer"
+        description="Select a customer for loyalty points or history"
+        confirmText="Select Customer"
       />
 
       <ItemModifierModal 

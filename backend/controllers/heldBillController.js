@@ -19,7 +19,7 @@ exports.holdBill = async (req, res) => {
 
         // 1. Generate Hold Number: HOLD-YYYYMMDD-0001
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const [[{ count }]] = await connection.query('SELECT COUNT(*) as count FROM held_bills WHERE DATE(created_at) = CURDATE()');
+        const [[{ count }]] = await connection.query('SELECT COUNT(*) as count FROM held_bills WHERE DATE(created_at) = CURDATE() AND shop_id = ?', [req.shopId]);
         const holdNo = `HOLD-${today}-${(count + 1).toString().padStart(4, '0')}`;
 
         // 2. Validate Items and Calculate Totals (Backend Security)
@@ -27,7 +27,7 @@ exports.holdBill = async (req, res) => {
         for (const item of items) {
             // Check if combo or item
             const table = item.is_combo ? 'combo_meals' : 'items';
-            const [dbItem] = await connection.query(`SELECT price, name FROM ${table} WHERE id = ?`, [item.id]);
+            const [dbItem] = await connection.query(`SELECT price, name FROM ${table} WHERE id = ? AND shop_id = ?`, [item.id, req.shopId]);
             if (dbItem.length === 0) throw new Error(`Item/Combo ${item.id} not found`);
 
             let modifierTotal = 0;
@@ -36,8 +36,8 @@ exports.holdBill = async (req, res) => {
             if (item.modifiers && item.modifiers.length > 0) {
                 const modifierIds = item.modifiers.map(m => m.modifier_id || m.id);
                 const [dbModifiers] = await connection.query(
-                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active"',
-                    [modifierIds]
+                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active" AND shop_id = ?',
+                    [modifierIds, req.shopId]
                 );
 
                 for (const dbMod of dbModifiers) {
@@ -67,7 +67,7 @@ exports.holdBill = async (req, res) => {
 
         // 2.1 Security Check: Discount Approval Limit
         const discount = parseFloat(discount_value) || 0;
-        const [limitRows] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = "discount_approval_limit"');
+        const [limitRows] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = "discount_approval_limit" AND shop_id = ?', [req.shopId]);
         const discountLimit = limitRows.length > 0 ? parseFloat(limitRows[0].setting_value) : 0;
         
         if (discount > discountLimit && req.user.role !== 'admin') {
@@ -81,9 +81,9 @@ exports.holdBill = async (req, res) => {
         // 3. Insert into held_bills
         const [heldResult] = await connection.query(
             `INSERT INTO held_bills 
-            (uuid, hold_no, customer_name, customer_phone, note, subtotal, discount, grand_total, status, created_by) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [heldUuid, holdNo, customer_name || 'Walk-in Customer', customer_phone || null, note || null, calculatedSubtotal, discount, grandTotal, 'held', req.user.id]
+            (uuid, hold_no, customer_name, customer_phone, note, subtotal, discount, grand_total, status, created_by, shop_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [heldUuid, holdNo, customer_name || 'Walk-in Customer', customer_phone || null, note || null, calculatedSubtotal, discount, grandTotal, 'held', req.user.id, req.shopId]
         );
 
         const heldBillId = heldResult.insertId;
@@ -93,8 +93,8 @@ exports.holdBill = async (req, res) => {
             const itemUuid = generateUuid();
             const [itemResult] = await connection.query(
                 `INSERT INTO held_bill_items 
-                (uuid, held_bill_id, item_id, item_type, combo_id, item_name, portion_type, qty, unit_price, modifier_total, total, note, special_note) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (uuid, held_bill_id, item_id, item_type, combo_id, item_name, portion_type, qty, unit_price, modifier_total, total, note, special_note, shop_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     itemUuid,
                     heldBillId, 
@@ -108,7 +108,8 @@ exports.holdBill = async (req, res) => {
                     item.processed.modifier_total,
                     item.processed.total,
                     item.note || null,
-                    item.special_note || null
+                    item.special_note || null,
+                    req.shopId
                 ]
             );
             
@@ -119,9 +120,9 @@ exports.holdBill = async (req, res) => {
                 for (const mod of item.processed.modifiers) {
                     const modUuid = generateUuid();
                     await connection.query(
-                        `INSERT INTO held_bill_item_modifiers (uuid, held_bill_item_id, modifier_id, modifier_name, modifier_type, price_delta)
-                         VALUES (?, ?, ?, ?, ?, ?)`,
-                        [modUuid, heldBillItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta]
+                        `INSERT INTO held_bill_item_modifiers (uuid, held_bill_item_id, modifier_id, modifier_name, modifier_type, price_delta, shop_id)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [modUuid, heldBillItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta, req.shopId]
                     );
                 }
             }
@@ -153,8 +154,8 @@ exports.getHeldBills = async (req, res) => {
     const { status = 'held', search } = req.query;
     
     try {
-        let sql = "SELECT h.*, u.name as created_by_name FROM held_bills h LEFT JOIN users u ON h.created_by = u.id WHERE 1=1";
-        const params = [];
+        let sql = "SELECT h.*, u.name as created_by_name FROM held_bills h LEFT JOIN users u ON h.created_by = u.id WHERE h.shop_id = ?";
+        const params = [req.shopId];
 
         if (status && status !== 'all') {
             sql += " AND h.status = ?";
@@ -183,18 +184,18 @@ exports.getHeldBills = async (req, res) => {
 exports.getHeldBillById = async (req, res) => {
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [bills] = await db.query(`SELECT * FROM held_bills WHERE ${where.query}`, [where.value]);
+        const [bills] = await db.query(`SELECT * FROM held_bills WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (bills.length === 0) {
             return res.status(404).json({ success: false, message: 'Held bill not found' });
         }
         const heldBillId = bills[0].id;
 
-        const [items] = await db.query('SELECT * FROM held_bill_items WHERE held_bill_id = ?', [heldBillId]);
+        const [items] = await db.query('SELECT * FROM held_bill_items WHERE held_bill_id = ? AND shop_id = ?', [heldBillId, req.shopId]);
         
         for (let item of items) {
             const [itemMods] = await db.query(
-                'SELECT modifier_id, modifier_name as name, modifier_type as type, price_delta FROM held_bill_item_modifiers WHERE held_bill_item_id = ?',
-                [item.id]
+                'SELECT modifier_id, modifier_name as name, modifier_type as type, price_delta FROM held_bill_item_modifiers WHERE held_bill_item_id = ? AND shop_id = ?',
+                [item.id, req.shopId]
             );
             item.modifiers = itemMods;
         }
@@ -212,25 +213,25 @@ exports.getHeldBillById = async (req, res) => {
 exports.resumeHeldBill = async (req, res) => {
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [bills] = await db.query(`SELECT * FROM held_bills WHERE ${where.query} AND status IN ('held', 'resumed')`, [where.value]);
+        const [bills] = await db.query(`SELECT * FROM held_bills WHERE ${where.query} AND status IN ('held', 'resumed') AND shop_id = ?`, [where.value, req.shopId]);
         if (bills.length === 0) {
             return res.status(404).json({ success: false, message: 'Held bill not found or already completed/cancelled' });
         }
         const heldBillId = bills[0].id;
 
-        const [items] = await db.query('SELECT * FROM held_bill_items WHERE held_bill_id = ?', [heldBillId]);
+        const [items] = await db.query('SELECT * FROM held_bill_items WHERE held_bill_id = ? AND shop_id = ?', [heldBillId, req.shopId]);
         for (let item of items) {
             const [itemMods] = await db.query(
-                'SELECT modifier_id, modifier_name as name, modifier_type as type, price_delta FROM held_bill_item_modifiers WHERE held_bill_item_id = ?',
-                [item.id]
+                'SELECT modifier_id, modifier_name as name, modifier_type as type, price_delta FROM held_bill_item_modifiers WHERE held_bill_item_id = ? AND shop_id = ?',
+                [item.id, req.shopId]
             );
             item.modifiers = itemMods;
         }
 
         // Update status to resumed
         await db.query(
-            "UPDATE held_bills SET status = 'resumed', resumed_by = ?, resumed_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [req.user.id, heldBillId]
+            "UPDATE held_bills SET status = 'resumed', resumed_by = ?, resumed_at = CURRENT_TIMESTAMP WHERE id = ? AND shop_id = ?",
+            [req.user.id, heldBillId, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -258,15 +259,15 @@ exports.cancelHeldBill = async (req, res) => {
 
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldBill] = await db.query(`SELECT id FROM held_bills WHERE ${where.query} AND status IN ('held', 'resumed')`, [where.value]);
+        const [oldBill] = await db.query(`SELECT id FROM held_bills WHERE ${where.query} AND status IN ('held', 'resumed') AND shop_id = ?`, [where.value, req.shopId]);
         if (oldBill.length === 0) {
             return res.status(404).json({ success: false, message: 'Held bill not found or already processed' });
         }
         const heldBillId = oldBill[0].id;
 
         const [result] = await db.query(
-            "UPDATE held_bills SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [reason, req.user.id, heldBillId]
+            "UPDATE held_bills SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = CURRENT_TIMESTAMP WHERE id = ? AND shop_id = ?",
+            [reason, req.user.id, heldBillId, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -291,7 +292,7 @@ exports.completeHeldBill = async (req, res) => {
 
         const where = buildIdOrUuidWhere(null, req.params.id);
         // 1. Get held bill
-        const [bills] = await connection.query(`SELECT * FROM held_bills WHERE ${where.query} AND status IN ('held', 'resumed')`, [where.value]);
+        const [bills] = await connection.query(`SELECT * FROM held_bills WHERE ${where.query} AND status IN ('held', 'resumed') AND shop_id = ?`, [where.value, req.shopId]);
         if (bills.length === 0) throw new Error('Held bill not found or already completed');
         const heldBill = bills[0];
         const heldBillId = heldBill.id;
@@ -304,7 +305,7 @@ exports.completeHeldBill = async (req, res) => {
         if (itemsToProcess) {
             for (const i of itemsToProcess) {
                 const table = i.is_combo ? 'combo_meals' : 'items';
-                const [dbItem] = await connection.query(`SELECT price, name FROM ${table} WHERE id = ?`, [i.id]);
+                const [dbItem] = await connection.query(`SELECT price, name FROM ${table} WHERE id = ? AND shop_id = ?`, [i.id, req.shopId]);
                 if (dbItem.length === 0) throw new Error(`Item/Combo ${i.id} not found`);
 
                 const realPrice = parseFloat(dbItem[0].price);
@@ -314,8 +315,8 @@ exports.completeHeldBill = async (req, res) => {
                 if (i.modifiers && i.modifiers.length > 0) {
                     const modifierIds = i.modifiers.map(m => m.modifier_id || m.id);
                     const [dbModifiers] = await connection.query(
-                        'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active"',
-                        [modifierIds]
+                        'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active" AND shop_id = ?',
+                        [modifierIds, req.shopId]
                     );
                     for (const dbMod of dbModifiers) {
                         const delta = parseFloat(dbMod.price_delta || 0);
@@ -346,9 +347,9 @@ exports.completeHeldBill = async (req, res) => {
                 });
             }
         } else {
-            [heldItems] = await connection.query('SELECT * FROM held_bill_items WHERE held_bill_id = ?', [heldBillId]);
+            [heldItems] = await connection.query('SELECT * FROM held_bill_items WHERE held_bill_id = ? AND shop_id = ?', [heldBillId, req.shopId]);
             for (let item of heldItems) {
-                const [itemMods] = await connection.query('SELECT * FROM held_bill_item_modifiers WHERE held_bill_item_id = ?', [item.id]);
+                const [itemMods] = await connection.query('SELECT * FROM held_bill_item_modifiers WHERE held_bill_item_id = ? AND shop_id = ?', [item.id, req.shopId]);
                 item.modifiers = itemMods;
             }
             subtotal = parseFloat(heldBill.subtotal);
@@ -356,7 +357,7 @@ exports.completeHeldBill = async (req, res) => {
         const discount = parseFloat(discount_value !== undefined ? discount_value : heldBill.discount);
         
         // System Settings for Tax/SC/Limits
-        const [settingsRows] = await connection.query('SELECT setting_key, setting_value FROM settings WHERE setting_key IN ("tax_rate", "service_charge_rate", "tax_enabled", "service_charge_enabled", "discount_approval_limit")');
+        const [settingsRows] = await connection.query('SELECT setting_key, setting_value FROM settings WHERE setting_key IN ("tax_rate", "service_charge_rate", "tax_enabled", "service_charge_enabled", "discount_approval_limit") AND shop_id = ?', [req.shopId]);
         const settings = {};
         settingsRows.forEach(row => settings[row.setting_key] = row.setting_value);
 
@@ -385,8 +386,8 @@ exports.completeHeldBill = async (req, res) => {
 
         const [invResult] = await connection.query(
             `INSERT INTO invoices 
-            (uuid, invoice_no, invoice_type, payment_status, payment_method, subtotal, discount, tax_rate, tax_amount, service_charge_rate, service_charge_amount, grand_total, paid_amount, customer_id, created_by) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (uuid, invoice_no, invoice_type, payment_status, payment_method, subtotal, discount, tax_rate, tax_amount, service_charge_rate, service_charge_amount, grand_total, paid_amount, customer_id, created_by, shop_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 invoiceUuid,
                 invoiceNo, 
@@ -402,7 +403,8 @@ exports.completeHeldBill = async (req, res) => {
                 grand_total, 
                 payment_method === 'credit' ? 0 : grand_total,
                 customer_id || null,
-                req.user.id
+                req.user.id,
+                req.shopId
             ]
         );
 
@@ -412,8 +414,8 @@ exports.completeHeldBill = async (req, res) => {
         for (const item of heldItems) {
             const itemUuid = generateUuid();
             const [invItemResult] = await connection.query(
-                'INSERT INTO invoice_items (uuid, invoice_id, item_id, item_type, combo_id, item_name, qty, unit_price, modifier_total, total, special_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [itemUuid, invoiceId, item.item_id, item.item_type, item.combo_id, item.item_name, item.qty, item.unit_price, item.modifier_total || 0, item.total, item.special_note || null]
+                'INSERT INTO invoice_items (uuid, invoice_id, item_id, item_type, combo_id, item_name, qty, unit_price, modifier_total, total, special_note, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [itemUuid, invoiceId, item.item_id, item.item_type, item.combo_id, item.item_name, item.qty, item.unit_price, item.modifier_total || 0, item.total, item.special_note || null, req.shopId]
             );
             const invoiceItemId = invItemResult.insertId;
 
@@ -422,8 +424,8 @@ exports.completeHeldBill = async (req, res) => {
                 for (const mod of item.modifiers) {
                     const modUuid = generateUuid();
                     await connection.query(
-                        'INSERT INTO invoice_item_modifiers (uuid, invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta) VALUES (?, ?, ?, ?, ?, ?)',
-                        [modUuid, invoiceItemId, mod.modifier_id, mod.modifier_name || mod.name, mod.modifier_type || mod.type, mod.price_delta]
+                        'INSERT INTO invoice_item_modifiers (uuid, invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        [modUuid, invoiceItemId, mod.modifier_id, mod.modifier_name || mod.name, mod.modifier_type || mod.type, mod.price_delta, req.shopId]
                     );
                 }
             }
@@ -432,27 +434,27 @@ exports.completeHeldBill = async (req, res) => {
         // 6. Handle Payments / Credit
         if (payment_method === 'credit' && customer_id) {
             // Update customer balance
-            await connection.query('UPDATE customers SET current_balance = current_balance + ? WHERE id = ?', [grand_total, customer_id]);
+            await connection.query('UPDATE customers SET current_balance = current_balance + ? WHERE id = ? AND shop_id = ?', [grand_total, customer_id, req.shopId]);
             
             // Log to ledger
-            const [cust] = await connection.query('SELECT current_balance FROM customers WHERE id = ?', [customer_id]);
+            const [cust] = await connection.query('SELECT current_balance FROM customers WHERE id = ? AND shop_id = ?', [customer_id, req.shopId]);
             await connection.query(
-                'INSERT INTO customer_ledger (customer_id, invoice_id, type, amount, balance_after, description) VALUES (?, ?, ?, ?, ?, ?)',
-                [customer_id, invoiceId, 'credit', grand_total, cust[0].current_balance, `Credit sale from ${heldBill.hold_no}`]
+                'INSERT INTO customer_ledger (customer_id, invoice_id, type, amount, balance_after, description, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [customer_id, invoiceId, 'credit', grand_total, cust[0].current_balance, `Credit sale from ${heldBill.hold_no}`, req.shopId]
             );
         } else {
             // Record Payment
             const payUuid = generateUuid();
             await connection.query(
-                'INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount) VALUES (?, ?, ?, ?)',
-                [payUuid, invoiceId, payment_method, grand_total]
+                'INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, shop_id) VALUES (?, ?, ?, ?, ?)',
+                [payUuid, invoiceId, payment_method, grand_total, req.shopId]
             );
         }
 
         // 7. Update Held Bill
         await connection.query(
-            "UPDATE held_bills SET status = 'completed', invoice_id = ?, completed_by = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [invoiceId, req.user.id, heldBillId]
+            "UPDATE held_bills SET status = 'completed', invoice_id = ?, completed_by = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ? AND shop_id = ?",
+            [invoiceId, req.user.id, heldBillId, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');

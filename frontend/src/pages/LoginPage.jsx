@@ -96,16 +96,16 @@ const LoginPage = () => {
             <div className="mt-auto relative z-10 pt-12">
                     <div className="space-y-3">
                         <div className="flex justify-between items-center bg-white/5 p-2 px-3 rounded-xl border border-white/5">
-                            <p className="text-[10px] text-slate-400 font-black uppercase">Admin</p>
-                            <p className="text-[10px] text-white font-bold">admin@restopos.com</p>
+                            <p className="text-[10px] text-slate-400 font-black uppercase">Super Admin</p>
+                            <p className="text-[10px] text-white font-bold">superadmin@restopos.com</p>
                         </div>
                         <div className="flex justify-between items-center bg-white/5 p-2 px-3 rounded-xl border border-white/5">
-                            <p className="text-[10px] text-slate-400 font-black uppercase">Cashier</p>
-                            <p className="text-[10px] text-white font-bold">cashier@restopos.com</p>
+                            <p className="text-[10px] text-slate-400 font-black uppercase">Shop Admin</p>
+                            <p className="text-[10px] text-white font-bold">admin@restopos.com</p>
                         </div>
                         <div className="flex justify-between items-center bg-indigo-600/20 p-2 px-3 rounded-xl border border-indigo-500/20">
                             <p className="text-[10px] text-indigo-300 font-black uppercase">Password</p>
-                            <p className="text-[10px] text-white font-bold">admin123</p>
+                            <p className="text-[10px] text-white font-bold">superadmin123 / admin123</p>
                         </div>
                     </div>
             </div>

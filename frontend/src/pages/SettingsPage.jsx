@@ -22,11 +22,15 @@ import {
   Users,
   UserCog,
   BarChart3,
-  Utensils
+  Utensils,
+  QrCode,
+  Star,
+  Coins
 } from 'lucide-react';
 import { AppButton, AppCard, FormInput, FormSelect, useToast } from '../components/ui';
 import { cn } from '../utils/cn';
 import { useSettings } from '../context/SettingsContext';
+import PermissionsTab from '../components/settings/PermissionsTab';
 
 const SettingsPage = () => {
   const toast = useToast();
@@ -38,7 +42,7 @@ const SettingsPage = () => {
 
   const tabs = [
     { id: 'business', label: 'Business Info', icon: Store },
-    { id: 'billing', label: 'Billing & Tax', icon: Percent },
+    { id: 'billing', label: 'Currency & Tax', icon: Coins },
     { id: 'receipt_print', label: 'Receipt & Print', icon: Printer },
     { id: 'kot', label: 'KOT & Kitchen', icon: ChefHat },
     { id: 'naya_book', label: 'Naya Book', icon: BookOpen },
@@ -48,7 +52,10 @@ const SettingsPage = () => {
     { id: 'orders_tables', label: 'Orders & Tables', icon: Grid3X3 },
     { id: 'reservations', label: 'Reservations', icon: Calendar },
     { id: 'security', label: 'Security', icon: ShieldCheck },
+    { id: 'permissions', label: 'Employee Permissions', icon: UserCog },
     { id: 'backup', label: 'Backup', icon: Database },
+    { id: 'public_menu', label: 'Digital Menu', icon: QrCode },
+    { id: 'loyalty', label: 'Loyalty Rewards', icon: Star },
   ];
 
   useEffect(() => {
@@ -169,8 +176,11 @@ const SettingsPage = () => {
                                     </AppButton>
                                 }
                             >
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-2">
-                                    {Object.entries(groupedSettings[tab.id] || {}).map(([key, setting]) => (
+                                {tab.id === 'permissions' ? (
+                                    <PermissionsTab />
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-2">
+                                        {Object.entries(groupedSettings[tab.id] || {}).map(([key, setting]) => (
                                         <div key={key} className={cn(
                                             "space-y-2",
                                             setting.type === 'string' && key.includes('message') ? "md:col-span-2" : ""
@@ -225,6 +235,7 @@ const SettingsPage = () => {
                                         </div>
                                     )}
                                 </div>
+                                )}
                             </AppCard>
                         </div>
                       )

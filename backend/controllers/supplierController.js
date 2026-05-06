@@ -8,8 +8,8 @@ const supplierAccountService = require('../services/supplierAccountService');
 exports.getSuppliers = async (req, res) => {
     try {
         const { search, status } = req.query;
-        let query = 'SELECT * FROM suppliers WHERE 1=1';
-        let params = [];
+        let query = 'SELECT * FROM suppliers WHERE shop_id = ?';
+        let params = [req.shopId];
 
         if (search) {
             query += ' AND (name LIKE ? OR phone LIKE ?)';
@@ -44,18 +44,18 @@ exports.createSupplier = async (req, res) => {
         const openBalance = parseFloat(opening_balance || 0);
         
         const [result] = await connection.query(
-            `INSERT INTO suppliers (name, phone, address, email, contact_person, opening_balance, current_balance, notes, created_by) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [name, phone, address, email, contact_person, openBalance, openBalance, notes, req.user.id]
+            `INSERT INTO suppliers (name, phone, address, email, contact_person, opening_balance, current_balance, notes, created_by, shop_id) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [name, phone, address, email, contact_person, openBalance, openBalance, notes, req.user.id, req.shopId]
         );
         
         const supplierId = result.insertId;
 
         if (openBalance > 0) {
             await connection.query(
-                `INSERT INTO supplier_ledger (supplier_id, type, amount, balance_after, description)
-                 VALUES (?, 'debit', ?, ?, ?)`,
-                [supplierId, openBalance, openBalance, 'Opening balance recorded']
+                `INSERT INTO supplier_ledger (supplier_id, type, amount, balance_after, description, shop_id)
+                 VALUES (?, 'debit', ?, ?, ?, ?)`,
+                [supplierId, openBalance, openBalance, 'Opening balance recorded', req.shopId]
             );
         }
 
@@ -79,7 +79,7 @@ exports.getSupplierAccount = async (req, res) => {
     try {
         const supplierId = req.params.id;
         
-        const [suppliers] = await db.query('SELECT * FROM suppliers WHERE id = ?', [supplierId]);
+        const [suppliers] = await db.query('SELECT * FROM suppliers WHERE id = ? AND shop_id = ?', [supplierId, req.shopId]);
         if (suppliers.length === 0) return res.status(404).json({ success: false, message: 'Supplier not found' });
         const supplier = suppliers[0];
 
@@ -87,19 +87,19 @@ exports.getSupplierAccount = async (req, res) => {
         const [unpaidSummary] = await db.query(
             `SELECT COUNT(*) as count, SUM(balance_amount) as total 
              FROM purchases 
-             WHERE supplier_id = ? AND payment_status IN ('unpaid', 'partial')`,
-            [supplierId]
+             WHERE supplier_id = ? AND payment_status IN ('unpaid', 'partial') AND shop_id = ?`,
+            [supplierId, req.shopId]
         );
 
         const [lastPayment] = await db.query(
-            'SELECT created_at FROM supplier_payments WHERE supplier_id = ? ORDER BY created_at DESC LIMIT 1',
-            [supplierId]
+            'SELECT created_at FROM supplier_payments WHERE supplier_id = ? AND shop_id = ? ORDER BY created_at DESC LIMIT 1',
+            [supplierId, req.shopId]
         );
 
         // Get History (Limit for performance)
-        const [purchases] = await db.query('SELECT * FROM purchases WHERE supplier_id = ? ORDER BY purchase_date DESC LIMIT 50', [supplierId]);
-        const [ledger] = await db.query('SELECT * FROM supplier_ledger WHERE supplier_id = ? ORDER BY created_at DESC LIMIT 100', [supplierId]);
-        const [payments] = await db.query('SELECT * FROM supplier_payments WHERE supplier_id = ? ORDER BY created_at DESC LIMIT 50', [supplierId]);
+        const [purchases] = await db.query('SELECT * FROM purchases WHERE supplier_id = ? AND shop_id = ? ORDER BY purchase_date DESC LIMIT 50', [supplierId, req.shopId]);
+        const [ledger] = await db.query('SELECT * FROM supplier_ledger WHERE supplier_id = ? AND shop_id = ? ORDER BY created_at DESC LIMIT 100', [supplierId, req.shopId]);
+        const [payments] = await db.query('SELECT * FROM supplier_payments WHERE supplier_id = ? AND shop_id = ? ORDER BY created_at DESC LIMIT 50', [supplierId, req.shopId]);
 
         res.json({
             success: true,
@@ -133,7 +133,7 @@ exports.recordPayment = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const [suppliers] = await connection.query('SELECT current_balance, status FROM suppliers WHERE id = ?', [supplierId]);
+        const [suppliers] = await connection.query('SELECT current_balance, status FROM suppliers WHERE id = ? AND shop_id = ?', [supplierId, req.shopId]);
         if (suppliers.length === 0) throw new Error('Supplier not found');
         if (suppliers[0].status !== 'active') throw new Error('Cannot pay an inactive supplier');
 
@@ -145,7 +145,8 @@ exports.recordPayment = async (req, res) => {
             amount: payAmount,
             paymentMethod: payment_method || 'cash',
             note,
-            userId: req.user.id
+            userId: req.user.id,
+            shopId: req.shopId
         });
 
         await logAction(req.user.id, 'supplier_payment_created', 'supplier', supplierId, null, { amount: payAmount, method: payment_method });
@@ -167,7 +168,7 @@ exports.recordPayment = async (req, res) => {
 exports.updateStatus = async (req, res) => {
     try {
         const { status } = req.body;
-        await db.query('UPDATE suppliers SET status = ? WHERE id = ?', [status, req.params.id]);
+        await db.query('UPDATE suppliers SET status = ? WHERE id = ? AND shop_id = ?', [status, req.params.id, req.shopId]);
         await logAction(req.user.id, 'supplier_status_changed', 'supplier', req.params.id, null, { status });
         res.json({ success: true, message: `Supplier status updated to ${status}` });
     } catch (error) {

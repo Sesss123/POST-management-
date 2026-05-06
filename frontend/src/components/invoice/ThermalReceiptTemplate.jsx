@@ -24,6 +24,10 @@ const ThermalReceiptTemplate = ({ invoice }) => {
     balance_amount,
     payment_method,
     payment_status,
+    currency_code,
+    currency_symbol,
+    tax_name,
+    tax_inclusive,
     settings
   } = invoice;
 
@@ -32,7 +36,8 @@ const ThermalReceiptTemplate = ({ invoice }) => {
     return isNaN(n) ? 0 : n;
   };
 
-  const currency = settings?.currency_symbol || 'Rs.';
+  const currency = currency_symbol || settings?.currency_symbol || 'Rs.';
+  const taxName = tax_name || settings?.tax_name || 'TAX';
   const dateStr = created_at ? new Date(created_at).toLocaleDateString() : new Date().toLocaleDateString();
   const timeStr = created_at ? new Date(created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -130,7 +135,7 @@ const ThermalReceiptTemplate = ({ invoice }) => {
 
         {parseNum(tax_amount) > 0 && (
           <div className="flex justify-between">
-            <span>TAX ({parseNum(tax_rate)}%):</span>
+            <span>{taxName} ({parseNum(tax_rate)}%){tax_inclusive ? ' [INC]' : ''}:</span>
             <span>{parseNum(tax_amount).toFixed(2)}</span>
           </div>
         )}

@@ -1,6 +1,7 @@
--- RestoLedger POS MySQL Schema
-CREATE DATABASE IF NOT EXISTS restoledger_pos;
-USE restoledger_pos;
+-- RestoLedger POS Database Schema
+-- Complete structure of the database including all modules.
+
+SET FOREIGN_KEY_CHECKS = 0;
 
 -- 1. Users
 CREATE TABLE IF NOT EXISTS users (
@@ -18,11 +19,34 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS items (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    short_code VARCHAR(50) NULL,
     category VARCHAR(100),
+    main_category VARCHAR(100) NULL,
+    portion_type VARCHAR(50) DEFAULT 'regular',
     price DECIMAL(10, 2) NOT NULL,
-    cost_price DECIMAL(10, 2) DEFAULT 0,
-    stock_qty INT DEFAULT 0,
+    portion_label VARCHAR(100) DEFAULT 'Single',
+    description TEXT,
+    track_stock BOOLEAN DEFAULT FALSE,
+    stock_qty DECIMAL(12,2) DEFAULT 0,
+    low_stock_threshold DECIMAL(12,2) DEFAULT 10,
+    is_popular BOOLEAN DEFAULT FALSE,
+    display_order INT DEFAULT 0,
     status ENUM('active', 'inactive') DEFAULT 'active',
+    availability_status ENUM('available', 'sold_out', 'temporarily_unavailable') DEFAULT 'available',
+    item_type VARCHAR(50) DEFAULT 'food',
+    send_to_kitchen BOOLEAN DEFAULT TRUE,
+    quick_sale_enabled BOOLEAN DEFAULT FALSE,
+    age_restricted BOOLEAN DEFAULT FALSE,
+    requires_age_confirmation BOOLEAN DEFAULT FALSE,
+    barcode VARCHAR(100) NULL,
+    unit_type VARCHAR(50) DEFAULT 'item',
+    no_receipt_default BOOLEAN DEFAULT FALSE,
+    show_in_quick_bar BOOLEAN DEFAULT FALSE,
+    purchase_unit_type VARCHAR(50) DEFAULT 'item',
+    units_per_purchase_unit INT DEFAULT 1,
+    is_quick_retail BOOLEAN DEFAULT FALSE,
+    is_restaurant_item BOOLEAN DEFAULT TRUE,
+    pack_size INT DEFAULT 20,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -58,7 +82,10 @@ CREATE TABLE IF NOT EXISTS table_sessions (
     session_no VARCHAR(50) UNIQUE NOT NULL,
     table_id INT NOT NULL,
     customer_id INT NULL,
-    status ENUM('open', 'billed', 'paid', 'credit', 'cancelled') DEFAULT 'open',
+    order_type ENUM('dine_in', 'takeaway', 'delivery', 'pickup') DEFAULT 'dine_in',
+    waiter_id INT NULL,
+    reservation_id INT NULL,
+    status ENUM('open', 'billed', 'paid', 'credit', 'cancelled', 'merged') DEFAULT 'open',
     opened_by INT,
     closed_by INT NULL,
     opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -66,7 +93,8 @@ CREATE TABLE IF NOT EXISTS table_sessions (
     FOREIGN KEY (table_id) REFERENCES restaurant_tables(id),
     FOREIGN KEY (customer_id) REFERENCES customers(id),
     FOREIGN KEY (opened_by) REFERENCES users(id),
-    FOREIGN KEY (closed_by) REFERENCES users(id)
+    FOREIGN KEY (closed_by) REFERENCES users(id),
+    FOREIGN KEY (waiter_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- 6. Order Items
@@ -77,15 +105,24 @@ CREATE TABLE IF NOT EXISTS order_items (
     item_name VARCHAR(255) NOT NULL,
     qty INT NOT NULL,
     unit_price DECIMAL(10, 2) NOT NULL,
+    modifier_total DECIMAL(10, 2) DEFAULT 0,
     total DECIMAL(15, 2) NOT NULL,
+    item_type ENUM('item', 'combo') DEFAULT 'item',
+    combo_id INT NULL,
     kot_sent BOOLEAN DEFAULT FALSE,
     note TEXT NULL,
     status ENUM('active', 'voided', 'served', 'cancelled', 'billed') DEFAULT 'active',
+    void_reason TEXT NULL,
+    voided_by INT NULL,
+    voided_at TIMESTAMP NULL,
+    waiter_id INT NULL,
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES table_sessions(id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES items(id),
-    FOREIGN KEY (created_by) REFERENCES users(id)
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (waiter_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (voided_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- 7. KOT Orders
@@ -94,15 +131,17 @@ CREATE TABLE IF NOT EXISTS kot_orders (
     kot_no VARCHAR(50) UNIQUE NOT NULL,
     table_id INT NULL,
     session_id INT NULL,
-    order_type ENUM('dine_in', 'takeaway', 'delivery') NOT NULL,
+    order_type ENUM('dine_in', 'takeaway', 'delivery', 'pickup') NOT NULL,
     status ENUM('pending', 'preparing', 'ready', 'served', 'cancelled') DEFAULT 'pending',
+    waiter_id INT NULL,
     note TEXT NULL,
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (table_id) REFERENCES restaurant_tables(id),
     FOREIGN KEY (session_id) REFERENCES table_sessions(id),
-    FOREIGN KEY (created_by) REFERENCES users(id)
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (waiter_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- 8. KOT Items
@@ -125,19 +164,28 @@ CREATE TABLE IF NOT EXISTS invoices (
     table_id INT NULL,
     session_id INT NULL,
     invoice_type ENUM('cash_sale', 'table_sale', 'delivery', 'credit_sale') NOT NULL,
+    order_type ENUM('dine_in', 'takeaway', 'delivery', 'pickup') DEFAULT 'takeaway',
     payment_status ENUM('paid', 'unpaid', 'partially_paid', 'cancelled') DEFAULT 'unpaid',
     payment_method ENUM('cash', 'card', 'credit', 'split', 'mixed') DEFAULT 'cash',
     subtotal DECIMAL(15, 2) NOT NULL,
     discount_type ENUM('percentage', 'fixed') DEFAULT 'fixed',
     discount_value DECIMAL(15, 2) DEFAULT 0.00,
     discount DECIMAL(15, 2) DEFAULT 0.00,
+    promotion_id INT NULL,
+    promotion_discount_amount DECIMAL(15, 2) DEFAULT 0.00,
     tax_rate DECIMAL(5, 2) DEFAULT 0.00,
     tax_amount DECIMAL(15, 2) DEFAULT 0.00,
     service_charge_rate DECIMAL(5, 2) DEFAULT 0.00,
     service_charge_amount DECIMAL(15, 2) DEFAULT 0.00,
     grand_total DECIMAL(15, 2) NOT NULL,
     paid_amount DECIMAL(15, 2) DEFAULT 0.00,
+    cash_received DECIMAL(15,2) DEFAULT 0,
+    change_amount DECIMAL(15,2) DEFAULT 0,
     balance_amount DECIMAL(15, 2) DEFAULT 0.00,
+    sale_channel VARCHAR(50) DEFAULT 'normal',
+    sale_type ENUM('quick', 'restaurant') DEFAULT 'restaurant',
+    no_receipt BOOLEAN DEFAULT FALSE,
+    receipt_printed BOOLEAN DEFAULT FALSE,
     cancel_reason TEXT NULL,
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -156,7 +204,13 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     item_name VARCHAR(255) NOT NULL,
     qty INT NOT NULL,
     unit_price DECIMAL(10, 2) NOT NULL,
+    modifier_total DECIMAL(10, 2) DEFAULT 0,
     total DECIMAL(15, 2) NOT NULL,
+    item_type VARCHAR(50) NULL,
+    age_restricted BOOLEAN DEFAULT FALSE,
+    age_confirmed BOOLEAN DEFAULT FALSE,
+    send_to_kitchen BOOLEAN DEFAULT TRUE,
+    no_receipt_item BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
 );
@@ -172,22 +226,7 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
     FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 
--- 12. Payments (Direct customer payments)
-CREATE TABLE IF NOT EXISTS payments (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id INT NULL,
-    invoice_id INT NULL,
-    amount DECIMAL(15, 2) NOT NULL,
-    payment_method VARCHAR(50),
-    transaction_id VARCHAR(100),
-    created_by INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
-    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-);
-
--- 13. Customer Ledger
+-- 12. Customer Ledger
 CREATE TABLE IF NOT EXISTS customer_ledger (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL,
@@ -199,11 +238,10 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
-    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL
 );
 
--- 14. Held Bills
+-- 13. Held Bills
 CREATE TABLE IF NOT EXISTS held_bills (
     id INT AUTO_INCREMENT PRIMARY KEY,
     hold_no VARCHAR(50) UNIQUE,
@@ -213,6 +251,7 @@ CREATE TABLE IF NOT EXISTS held_bills (
     subtotal DECIMAL(15, 2) NOT NULL,
     discount DECIMAL(15, 2) DEFAULT 0.00,
     grand_total DECIMAL(15, 2) NOT NULL,
+    order_type VARCHAR(50) DEFAULT 'takeaway',
     status ENUM('held', 'resumed', 'cancelled', 'completed') DEFAULT 'held',
     cancel_reason TEXT,
     created_by INT,
@@ -233,7 +272,7 @@ CREATE TABLE IF NOT EXISTS held_bill_items (
     FOREIGN KEY (held_bill_id) REFERENCES held_bills(id) ON DELETE CASCADE
 );
 
--- 15. Shifts
+-- 14. Shifts
 CREATE TABLE IF NOT EXISTS shifts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     shift_no VARCHAR(50) UNIQUE,
@@ -249,7 +288,7 @@ CREATE TABLE IF NOT EXISTS shifts (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- 16. Cash Movements
+-- 15. Cash Movements
 CREATE TABLE IF NOT EXISTS cash_movements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     shift_id INT NOT NULL,
@@ -262,13 +301,78 @@ CREATE TABLE IF NOT EXISTS cash_movements (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- 17. Settings
-CREATE TABLE IF NOT EXISTS settings (
-    setting_key VARCHAR(255) PRIMARY KEY,
-    setting_value TEXT
+-- 16. Suppliers
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    address TEXT,
+    email VARCHAR(255) NULL,
+    contact_person VARCHAR(255) NULL,
+    opening_balance DECIMAL(15, 2) DEFAULT 0.00,
+    current_balance DECIMAL(15, 2) DEFAULT 0.00,
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- 18. Audit Logs
+-- 17. Purchases
+CREATE TABLE IF NOT EXISTS purchases (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    purchase_no VARCHAR(50) UNIQUE NOT NULL,
+    supplier_id INT NOT NULL,
+    purchase_date DATE NOT NULL,
+    subtotal DECIMAL(15, 2) NOT NULL,
+    discount DECIMAL(15, 2) DEFAULT 0.00,
+    grand_total DECIMAL(15, 2) NOT NULL,
+    paid_amount DECIMAL(15, 2) DEFAULT 0.00,
+    balance_amount DECIMAL(15, 2) DEFAULT 0.00,
+    payment_status ENUM('paid', 'unpaid', 'partial') DEFAULT 'unpaid',
+    note TEXT,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- 18. Purchase Items
+CREATE TABLE IF NOT EXISTS purchase_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    purchase_id INT NOT NULL,
+    item_id INT NULL,
+    item_name VARCHAR(255) NOT NULL,
+    qty INT NOT NULL,
+    unit_cost DECIMAL(10, 2) NOT NULL,
+    total DECIMAL(15, 2) NOT NULL,
+    FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
+);
+
+-- 19. Retail Stock Receipts
+CREATE TABLE IF NOT EXISTS retail_stock_receipts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    item_id INT NOT NULL,
+    purchase_unit_type VARCHAR(50) NOT NULL,
+    purchase_unit_qty DECIMAL(12,2) NOT NULL,
+    units_per_purchase_unit INT NOT NULL,
+    total_units_added DECIMAL(12,2) NOT NULL,
+    cost_per_purchase_unit DECIMAL(12,2) NULL,
+    note TEXT NULL,
+    created_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (item_id) REFERENCES items(id)
+);
+
+-- 20. Settings
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR(255) PRIMARY KEY,
+    setting_value TEXT,
+    setting_type VARCHAR(50) DEFAULT 'string',
+    group_name VARCHAR(50) DEFAULT 'general',
+    description TEXT
+);
+
+-- 21. Audit Logs
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT,
@@ -283,18 +387,4 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- Seed Default Settings
-INSERT IGNORE INTO settings (setting_key, setting_value) VALUES 
-('restaurant_name', 'RestoLedger POS'),
-('restaurant_address', '123 POS Street, City'),
-('restaurant_phone', '0112345678'),
-('currency_symbol', 'Rs.'),
-('receipt_footer_message', 'Thank you for dining with us!'),
-('service_charge_enabled', 'true'),
-('service_charge_rate', '10'),
-('tax_enabled', 'false'),
-('tax_rate', '0'),
-('stock_tracking_enabled', 'true'),
-('shift_enforcement_enabled', 'false'),
-('kot_printing_enabled', 'true'),
-('discount_approval_limit', '500');
+SET FOREIGN_KEY_CHECKS = 1;

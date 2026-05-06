@@ -143,7 +143,17 @@ const QuickRetailModal = ({ isOpen, onClose, onSuccess }) => {
                                         <ShoppingBag size={40} className="text-indigo-600" />
                                     </div>
                                     <div>
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{item.category}</p>
+                                        <div className="flex justify-between items-start gap-1">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{item.category}</p>
+                                            {item.track_stock === 1 && (
+                                                <span className={cn(
+                                                    "text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
+                                                    parseFloat(item.stock_qty) <= parseFloat(item.low_stock_threshold) ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-600"
+                                                )}>
+                                                    QTY: {item.stock_qty}
+                                                </span>
+                                            )}
+                                        </div>
                                         <p className="text-sm font-black text-slate-900 leading-tight line-clamp-2">{item.name}</p>
                                     </div>
                                     <div className="flex items-center justify-between mt-2">

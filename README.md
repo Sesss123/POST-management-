@@ -19,8 +19,8 @@ A premium full-stack Restaurant POS and Credit Ledger System built for Sri Lanka
 
 ### 1. Database Setup
 1. Create a MySQL database named `restoledger_pos`.
-2. Import `database/schema.sql`.
-3. Import `database/seed.sql` for initial data.
+2. Import `database/schema.sql` (Complete structure).
+3. Import `database/seed.sql` (Initial data/Menu).
 
 ### 2. Backend Setup
 1. Navigate to `backend/`.

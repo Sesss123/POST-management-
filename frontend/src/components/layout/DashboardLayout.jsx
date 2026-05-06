@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useSubscription } from '../../context/SubscriptionContext';
 import { 
   Menu,
   Bell,
@@ -9,10 +10,14 @@ import {
   X
 } from 'lucide-react';
 import Sidebar from './Sidebar';
+import SubscriptionBanner from '../subscription/SubscriptionBanner';
+import LockedScreen from '../subscription/LockedScreen';
+import LanguageSwitcher from '../common/LanguageSwitcher';
 import { cn } from '../../utils/cn';
 
 const DashboardLayout = () => {
   const { user } = useAuth();
+  const { isLocked } = useSubscription();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -65,6 +70,8 @@ const DashboardLayout = () => {
                 </span>
             </div>
             
+            <LanguageSwitcher />
+            
             <button className="p-2 lg:p-2.5 text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors relative">
                 <Bell size={20} />
                 <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 border-2 border-white rounded-full"></span>
@@ -82,6 +89,9 @@ const DashboardLayout = () => {
           </div>
         </header>
 
+        {/* Subscription Banner — shown below topbar */}
+        <SubscriptionBanner />
+
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className={cn(
@@ -92,6 +102,9 @@ const DashboardLayout = () => {
             </div>
         </div>
       </main>
+
+      {/* Locked Screen Overlay */}
+      {isLocked && <LockedScreen />}
 
       {/* Mobile Sidebar */}
       {isMobileMenuOpen && (

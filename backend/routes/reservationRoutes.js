@@ -1,15 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const { getReservations, createReservation, updateStatus, assignTable } = require('../controllers/reservationController');
-const { protect } = require('../middleware/authMiddleware');
+const reservationController = require('../controllers/reservationController');
 
-router.use(protect);
+// Routes are shop-scoped via server.js
 
-router.route('/')
-    .get(getReservations)
-    .post(createReservation);
+router.get('/', reservationController.getReservations);
+router.post('/', reservationController.createReservation);
 
-router.patch('/:id/status', updateStatus);
-router.patch('/:id/assign-table', assignTable);
+router.get('/:identifier', reservationController.getReservationById);
+router.put('/:uuid', reservationController.updateReservation);
+router.patch('/:uuid/status', reservationController.updateStatus);
+router.post('/:uuid/seat', reservationController.seatReservation);
+router.patch('/:uuid/cancel', reservationController.cancelReservation);
+router.patch('/:uuid/no-show', reservationController.markNoShow);
 
 module.exports = router;

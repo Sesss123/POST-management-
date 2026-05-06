@@ -5,27 +5,37 @@ const { db } = require('../config/db');
 // @access  Private
 exports.getDashboardSummary = async (req, res) => {
     try {
-        // Daily totals - Today's Sales
         const [dailySales] = await db.query(`
             SELECT 
                 SUM(grand_total) as todaySales,
                 SUM(CASE WHEN sale_type = 'quick' THEN grand_total ELSE 0 END) as todayQuick,
                 SUM(CASE WHEN sale_type = 'restaurant' THEN grand_total ELSE 0 END) as todayRestaurant,
-                SUM(CASE WHEN invoice_type = 'cash_sale' THEN grand_total ELSE 0 END) as todayCash,
-                SUM(CASE WHEN invoice_type = 'credit_sale' THEN grand_total ELSE 0 END) as todayCredit
+                SUM(CASE WHEN payment_method = 'cash' THEN grand_total ELSE 0 END) as todayCash,
+                SUM(CASE WHEN payment_method = 'card' THEN grand_total ELSE 0 END) as todayCard,
+                SUM(CASE WHEN payment_method = 'qr' THEN grand_total ELSE 0 END) as todayQR,
+                SUM(CASE WHEN payment_method = 'credit' THEN grand_total ELSE 0 END) as todayCredit
             FROM invoices 
             WHERE DATE(created_at) = CURDATE() 
             AND payment_status != 'cancelled'
-        `);
+            AND shop_id = ?
+        `, [req.shopId]);
 
-        const summaryData = dailySales[0].todaySales ? dailySales[0] : { todaySales: 0, todayQuick: 0, todayRestaurant: 0, todayCash: 0, todayCredit: 0 };
+        // Today's Expenses
+        const [dailyExpenses] = await db.query(`
+            SELECT SUM(amount) as todayExpenses 
+            FROM expenses 
+            WHERE DATE(expense_date) = CURDATE() AND status = 'active' AND shop_id = ?
+        `, [req.shopId]);
+        const todayExpenses = parseFloat(dailyExpenses[0].todayExpenses) || 0;
+
+        const summaryData = dailySales[0].todaySales ? dailySales[0] : { todaySales: 0, todayQuick: 0, todayRestaurant: 0, todayCash: 0, todayCard: 0, todayQR: 0, todayCredit: 0 };
 
         // Total Naya (credit balance)
-        const [nayaResult] = await db.query('SELECT SUM(current_balance) as totalNaya FROM customers');
+        const [nayaResult] = await db.query('SELECT SUM(current_balance) as totalNaya FROM customers WHERE shop_id = ?', [req.shopId]);
         const totalNaya = nayaResult[0].totalNaya || 0;
 
         // Open tables
-        const [tableResult] = await db.query('SELECT COUNT(*) as openTables FROM restaurant_tables WHERE status != "available"');
+        const [tableResult] = await db.query('SELECT COUNT(*) as openTables FROM restaurant_tables WHERE status != "available" AND shop_id = ?', [req.shopId]);
         const openTables = tableResult[0].openTables;
 
         // Recent invoices
@@ -33,9 +43,10 @@ exports.getDashboardSummary = async (req, res) => {
             SELECT i.*, c.name as customer_name 
             FROM invoices i 
             LEFT JOIN customers c ON i.customer_id = c.id 
+            WHERE i.shop_id = ?
             ORDER BY i.created_at DESC 
             LIMIT 5
-        `);
+        `, [req.shopId]);
 
         res.json({
             success: true,
@@ -45,7 +56,11 @@ exports.getDashboardSummary = async (req, res) => {
                     todayQuick: parseFloat(summaryData.todayQuick) || 0,
                     todayRestaurant: parseFloat(summaryData.todayRestaurant) || 0,
                     todayCash: parseFloat(summaryData.todayCash) || 0,
+                    todayCard: parseFloat(summaryData.todayCard) || 0,
+                    todayQR: parseFloat(summaryData.todayQR) || 0,
                     todayCredit: parseFloat(summaryData.todayCredit) || 0,
+                    todayExpenses,
+                    netProfit: (parseFloat(summaryData.todaySales) || 0) - todayExpenses,
                     totalNaya: parseFloat(totalNaya),
                     openTables
                 },
@@ -73,10 +88,11 @@ exports.getDailySales = async (req, res) => {
             LEFT JOIN customers c ON i.customer_id = c.id 
             WHERE DATE(i.created_at) = ${date ? '?' : 'CURDATE()'}
             AND i.payment_status != 'cancelled'
+            AND i.shop_id = ?
             ORDER BY i.created_at DESC
         `;
         
-        const [sales] = await db.query(sql, date ? [date] : []);
+        const [sales] = await db.query(sql, date ? [date, req.shopId] : [req.shopId]);
 
         res.json({ success: true, data: sales });
     } catch (error) {
@@ -92,9 +108,9 @@ exports.getCustomerBalances = async (req, res) => {
     try {
         const [balances] = await db.query(`
             SELECT * FROM customers 
-            WHERE current_balance > 0 
+            WHERE current_balance > 0 AND shop_id = ?
             ORDER BY current_balance DESC
-        `);
+        `, [req.shopId]);
         res.json({ success: true, data: balances });
     } catch (error) {
         console.error(error);
@@ -115,10 +131,10 @@ exports.getItemSales = async (req, res) => {
                 SUM(total) as total_revenue 
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
-            WHERE i.payment_status != 'cancelled'
+            WHERE i.payment_status != 'cancelled' AND i.shop_id = ?
             GROUP BY item_id, item_name
             ORDER BY total_revenue DESC
-        `);
+        `, [req.shopId]);
 
         res.json({ success: true, data: sales });
     } catch (error) {
@@ -145,8 +161,8 @@ exports.getEODReport = async (req, res) => {
                 SUM(service_charge_amount) as total_sc,
                 SUM(grand_total) as total_grand
             FROM invoices 
-            WHERE DATE(created_at) = ? AND payment_status != 'cancelled'`, 
-            [targetDate]
+            WHERE DATE(created_at) = ? AND payment_status != 'cancelled' AND shop_id = ?`, 
+            [targetDate, req.shopId]
         );
 
         // 2. Payments by Method
@@ -155,25 +171,25 @@ exports.getEODReport = async (req, res) => {
                 payment_method,
                 SUM(amount) as total
             FROM invoice_payments 
-            WHERE DATE(created_at) = ?
+            WHERE DATE(created_at) = ? AND shop_id = ?
             GROUP BY payment_method`,
-            [targetDate]
+            [targetDate, req.shopId]
         );
 
         // 3. Credit Sales specifically
         const [creditSales] = await db.query(`
             SELECT SUM(grand_total) as total 
             FROM invoices 
-            WHERE DATE(created_at) = ? AND payment_method = 'credit' AND payment_status != 'cancelled'`,
-            [targetDate]
+            WHERE DATE(created_at) = ? AND payment_method = 'credit' AND payment_status != 'cancelled' AND shop_id = ?`,
+            [targetDate, req.shopId]
         );
 
         // 4. Customer Credit Payments received
         const [creditPayments] = await db.query(`
             SELECT SUM(amount) as total 
             FROM payments 
-            WHERE DATE(created_at) = ? AND payment_method = 'cash'`,
-            [targetDate]
+            WHERE DATE(created_at) = ? AND payment_method = 'cash' AND shop_id = ?`,
+            [targetDate, req.shopId]
         );
 
         // 5. Shift Summaries
@@ -181,8 +197,8 @@ exports.getEODReport = async (req, res) => {
             SELECT s.*, u.name as user_name 
             FROM shifts s 
             JOIN users u ON s.user_id = u.id 
-            WHERE DATE(s.start_time) = ?`,
-            [targetDate]
+            WHERE DATE(s.start_time) = ? AND s.shop_id = ?`,
+            [targetDate, req.shopId]
         );
 
         // 6. Top Selling Items
@@ -193,37 +209,46 @@ exports.getEODReport = async (req, res) => {
                 SUM(total) as total_revenue 
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
-            WHERE DATE(i.created_at) = ? AND i.payment_status != 'cancelled'
+            WHERE DATE(i.created_at) = ? AND i.payment_status != 'cancelled' AND i.shop_id = ?
             GROUP BY item_id, item_name
             ORDER BY total_qty DESC
             LIMIT 10`,
-            [targetDate]
+            [targetDate, req.shopId]
         );
 
         // 7. Voids and Cancellations
         const [voids] = await db.query(`
             SELECT COUNT(*) as count 
             FROM order_items 
-            WHERE DATE(created_at) = ? AND status = 'voided'`,
-            [targetDate]
+            WHERE DATE(created_at) = ? AND status = 'voided' AND shop_id = ?`,
+            [targetDate, req.shopId]
         );
 
         const [cancelledInvoices] = await db.query(`
             SELECT COUNT(*) as count 
             FROM invoices 
-            WHERE DATE(created_at) = ? AND payment_status = 'cancelled'`,
-            [targetDate]
+            WHERE DATE(created_at) = ? AND payment_status = 'cancelled' AND shop_id = ?`,
+            [targetDate, req.shopId]
         );
 
-        // 8. Quick Sales
         const [quickSales] = await db.query(`
             SELECT 
                 COUNT(*) as count,
                 SUM(grand_total) as total
             FROM invoices 
-            WHERE DATE(created_at) = ? AND payment_status != 'cancelled' AND sale_channel = 'quick_no_receipt'`, 
-            [targetDate]
+            WHERE DATE(created_at) = ? AND payment_status != 'cancelled' AND sale_channel = 'quick_no_receipt' AND shop_id = ?`, 
+            [targetDate, req.shopId]
         );
+
+        // 9. Expenses
+        const [expenses] = await db.query(`
+            SELECT category, SUM(amount) as total 
+            FROM expenses 
+            WHERE DATE(expense_date) = ? AND status = 'active' AND shop_id = ?
+            GROUP BY category`,
+            [targetDate, req.shopId]
+        );
+        const totalExpenses = expenses.reduce((sum, e) => sum + parseFloat(e.total), 0);
 
         res.json({
             success: true,
@@ -240,7 +265,12 @@ exports.getEODReport = async (req, res) => {
                 quick_sales: {
                     count: quickSales[0].count || 0,
                     total: quickSales[0].total || 0
-                }
+                },
+                expenses: {
+                    breakdown: expenses,
+                    total: totalExpenses
+                },
+                net_profit: (salesSummary[0].total_grand || 0) - totalExpenses
             }
         });
 
@@ -262,15 +292,15 @@ exports.getCreditSummary = async (req, res) => {
                 COUNT(id) as credit_customers,
                 SUM(CASE WHEN current_balance > credit_limit AND credit_limit > 0 THEN 1 ELSE 0 END) as over_limit_customers
             FROM customers 
-            WHERE current_balance > 0
-        `);
+            WHERE current_balance > 0 AND shop_id = ?
+        `, [req.shopId]);
 
         // 2. Payments today
         const [paymentStats] = await db.query(`
             SELECT SUM(amount) as payments_today 
             FROM payments 
-            WHERE DATE(created_at) = CURDATE() AND customer_id IS NOT NULL
-        `);
+            WHERE DATE(created_at) = CURDATE() AND customer_id IS NOT NULL AND shop_id = ?
+        `, [req.shopId]);
 
         const stats = debtorStats[0];
         const paymentsToday = paymentStats[0].payments_today || 0;
@@ -297,22 +327,25 @@ exports.getCashierDashboard = async (req, res) => {
         const [dailySales] = await db.query(`
             SELECT 
                 SUM(grand_total) as todaySales,
-                SUM(CASE WHEN invoice_type = 'cash_sale' THEN grand_total ELSE 0 END) as todayCash,
+                SUM(CASE WHEN payment_method = 'cash' AND invoice_type = 'cash_sale' THEN grand_total ELSE 0 END) as todayCash,
+                SUM(CASE WHEN payment_method = 'card' AND invoice_type = 'cash_sale' THEN grand_total ELSE 0 END) as todayCard,
+                SUM(CASE WHEN payment_method = 'qr' THEN grand_total ELSE 0 END) as todayQR,
                 SUM(CASE WHEN invoice_type = 'credit_sale' THEN grand_total ELSE 0 END) as todayCredit,
                 COUNT(*) as invoiceCount
             FROM invoices 
             WHERE DATE(created_at) = CURDATE() 
             AND payment_status != 'cancelled'
-        `);
+            AND shop_id = ?
+        `, [req.shopId]);
 
-        const summaryData = dailySales[0].todaySales ? dailySales[0] : { todaySales: 0, todayCash: 0, todayCredit: 0, invoiceCount: 0 };
+        const summaryData = dailySales[0].todaySales ? dailySales[0] : { todaySales: 0, todayCash: 0, todayCard: 0, todayQR: 0, todayCredit: 0, invoiceCount: 0 };
 
         // Open tables
-        const [tableResult] = await db.query('SELECT COUNT(*) as openTables FROM restaurant_tables WHERE status != "available"');
+        const [tableResult] = await db.query('SELECT COUNT(*) as openTables FROM restaurant_tables WHERE status != "available" AND shop_id = ?', [req.shopId]);
         const openTables = tableResult[0].openTables;
 
         // Pending held bills (if any)
-        const [heldResult] = await db.query('SELECT COUNT(*) as pendingHeldBills FROM held_bills WHERE status = "held"');
+        const [heldResult] = await db.query('SELECT COUNT(*) as pendingHeldBills FROM held_bills WHERE status = "held" AND shop_id = ?', [req.shopId]);
         const pendingHeldBills = heldResult[0].pendingHeldBills;
 
         // Recent invoices
@@ -320,9 +353,10 @@ exports.getCashierDashboard = async (req, res) => {
             SELECT i.*, c.name as customer_name 
             FROM invoices i 
             LEFT JOIN customers c ON i.customer_id = c.id 
+            WHERE i.shop_id = ?
             ORDER BY i.created_at DESC 
             LIMIT 10
-        `);
+        `, [req.shopId]);
 
         res.json({
             success: true,
@@ -330,6 +364,8 @@ exports.getCashierDashboard = async (req, res) => {
                 summary: {
                     todaySales: parseFloat(summaryData.todaySales) || 0,
                     todayCash: parseFloat(summaryData.todayCash) || 0,
+                    todayCard: parseFloat(summaryData.todayCard) || 0,
+                    todayQR: parseFloat(summaryData.todayQR) || 0,
                     todayCredit: parseFloat(summaryData.todayCredit) || 0,
                     invoiceCount: summaryData.invoiceCount || 0,
                     openTables,
@@ -355,19 +391,20 @@ exports.getSupplierSummary = async (req, res) => {
                 SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_suppliers,
                 SUM(current_balance) as total_payable
             FROM suppliers
-        `);
+            WHERE shop_id = ?
+        `, [req.shopId]);
 
         const [purchaseStats] = await db.query(`
             SELECT SUM(grand_total) as total 
             FROM purchases 
-            WHERE DATE(created_at) = CURDATE()
-        `);
+            WHERE DATE(created_at) = CURDATE() AND shop_id = ?
+        `, [req.shopId]);
 
         const [paymentStats] = await db.query(`
             SELECT SUM(amount) as total 
             FROM supplier_payments 
-            WHERE DATE(created_at) = CURDATE()
-        `);
+            WHERE DATE(created_at) = CURDATE() AND shop_id = ?
+        `, [req.shopId]);
 
         res.json({
             success: true,
@@ -401,14 +438,15 @@ exports.getAnalytics = async (req, res) => {
             SELECT 
                 DATE_FORMAT(i.created_at, '%b %d') as date, 
                 SUM(i.grand_total) as revenue, 
-                (SELECT SUM(amount) FROM invoice_payments ip WHERE DATE(ip.created_at) = DATE(i.created_at)) as collection,
+                COALESCE((SELECT SUM(amount) FROM invoice_payments ip WHERE DATE(ip.created_at) = DATE(i.created_at) AND ip.shop_id = ?), 0) as collection,
                 COUNT(*) as count
             FROM invoices i
             WHERE DATE(i.created_at) BETWEEN ? AND ?
             AND i.payment_status != 'cancelled'
+            AND i.shop_id = ?
             GROUP BY DATE(i.created_at)
             ORDER BY DATE(i.created_at) ASC
-        `, [startDate, endDate]);
+        `, [req.shopId, startDate, endDate, req.shopId]);
 
         // 2. Category Distribution (Revenue by Category)
         const [categoryDist] = await db.query(`
@@ -420,9 +458,10 @@ exports.getAnalytics = async (req, res) => {
             JOIN invoices inv ON ii.invoice_id = inv.id
             WHERE inv.payment_status != 'cancelled'
             AND DATE(inv.created_at) BETWEEN ? AND ?
+            AND inv.shop_id = ?
             GROUP BY IFNULL(i.category, 'Uncategorized')
             ORDER BY value DESC
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         // 3. Payment Method Split
         const [paymentSplit] = await db.query(`
@@ -433,8 +472,9 @@ exports.getAnalytics = async (req, res) => {
             FROM invoices
             WHERE payment_status != 'cancelled'
             AND DATE(created_at) BETWEEN ? AND ?
+            AND shop_id = ?
             GROUP BY payment_method
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         // 4. Top 5 Items by Quantity
         const [topItems] = await db.query(`
@@ -446,10 +486,11 @@ exports.getAnalytics = async (req, res) => {
             JOIN invoices inv ON ii.invoice_id = inv.id
             WHERE inv.payment_status != 'cancelled'
             AND DATE(inv.created_at) BETWEEN ? AND ?
+            AND inv.shop_id = ?
             GROUP BY item_id, item_name
             ORDER BY value DESC
             LIMIT 5
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         // 5. Hourly Distribution (Today - always today for 'Busy Hours')
         const [hourlyDist] = await db.query(`
@@ -459,9 +500,10 @@ exports.getAnalytics = async (req, res) => {
             FROM invoices
             WHERE DATE(created_at) = CURDATE()
             AND payment_status != 'cancelled'
+            AND shop_id = ?
             GROUP BY HOUR(created_at)
             ORDER BY hour ASC
-        `);
+        `, [req.shopId]);
 
         // Format hourly data for recharts (ensure all 24 hours exist)
         const formattedHourly = Array.from({ length: 24 }, (_, i) => {
@@ -481,7 +523,8 @@ exports.getAnalytics = async (req, res) => {
             WHERE payment_status != 'cancelled'
             AND sale_channel = 'quick_no_receipt'
             AND DATE(created_at) BETWEEN ? AND ?
-        `, [startDate, endDate]);
+            AND shop_id = ?
+        `, [startDate, endDate, req.shopId]);
 
         // 7. Item Type Distribution (Revenue by Item Type)
         const [itemTypeDist] = await db.query(`
@@ -493,9 +536,10 @@ exports.getAnalytics = async (req, res) => {
             JOIN invoices inv ON ii.invoice_id = inv.id
             WHERE inv.payment_status != 'cancelled'
             AND DATE(inv.created_at) BETWEEN ? AND ?
+            AND inv.shop_id = ?
             GROUP BY COALESCE(i.item_type, 'food')
             ORDER BY value DESC
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         res.json({
             success: true,
@@ -537,11 +581,11 @@ exports.getAlerts = async (req, res) => {
         const [debtorAlerts] = await db.query(`
             SELECT id, name, current_balance, credit_limit 
             FROM customers 
-            WHERE (current_balance > credit_limit AND credit_limit > 0)
-            OR (current_balance > 0)
+            WHERE ((current_balance > credit_limit AND credit_limit > 0)
+            OR (current_balance > 0)) AND shop_id = ?
             ORDER BY current_balance DESC 
             LIMIT 10
-        `);
+        `, [req.shopId]);
         
         debtorAlerts.forEach(d => {
             if (parseFloat(d.current_balance) > parseFloat(d.credit_limit) && parseFloat(d.credit_limit) > 0) {
@@ -563,22 +607,23 @@ exports.getAlerts = async (req, res) => {
             }
         });
 
-        // 2. Low Stock
+        // 2. Low Stock & Inventory Status
         const [stockAlerts] = await db.query(`
-            SELECT id, name, stock_qty, low_stock_threshold 
+            SELECT id, name, stock_qty, low_stock_threshold, availability_status
             FROM items 
-            WHERE status = 'active' AND track_stock = 1 
-            AND (stock_qty <= low_stock_threshold OR stock_qty <= 0)
-            ORDER BY stock_qty ASC
+            WHERE status = 'active' AND track_stock = 1 AND shop_id = ?
+            AND (stock_qty <= low_stock_threshold OR stock_qty <= 0 OR availability_status = 'sold_out')
+            ORDER BY stock_qty ASC, availability_status DESC
             LIMIT 10
-        `);
+        `, [req.shopId]);
 
         stockAlerts.forEach(s => {
-            const isSoldOut = s.stock_qty <= 0;
+            const isSoldOut = s.stock_qty <= 0 || s.availability_status === 'sold_out';
             alerts.stock.push({
                 title: isSoldOut ? 'Item Sold Out' : 'Low Stock Alert',
-                description: `${s.name} ${isSoldOut ? 'is out of stock' : `is low (Qty: ${s.stock_qty})`}`,
+                description: `${s.name} ${isSoldOut ? 'is currently sold out' : `is running low (Qty: ${s.stock_qty})`}`,
                 severity: isSoldOut ? 'critical' : 'warning',
+                amount: s.stock_qty,
                 link: '/items'
             });
         });
@@ -587,14 +632,14 @@ exports.getAlerts = async (req, res) => {
         const [heldAlerts] = await db.query(`
             SELECT id, hold_no, created_at, TIMESTAMPDIFF(HOUR, created_at, NOW()) as hours_old
             FROM held_bills 
-            WHERE status IN ('held', 'resumed')
+            WHERE status IN ('held', 'resumed') AND shop_id = ?
             ORDER BY created_at ASC
-        `);
+        `, [req.shopId]);
 
         heldAlerts.forEach(h => {
             alerts.held_bills.push({
                 title: 'Pending Held Bill',
-                description: `${h.hold_no} has been parked for ${h.hours_old} hours`,
+                description: `${h.hold_no || `Bill #${h.id}`} has been parked for ${h.hours_old} hours`,
                 severity: h.hours_old > 5 ? 'critical' : 'info',
                 link: '/held-bills'
             });
@@ -605,10 +650,10 @@ exports.getAlerts = async (req, res) => {
             SELECT k.id, k.kot_no, k.created_at, TIMESTAMPDIFF(MINUTE, k.created_at, NOW()) as mins_old, t.table_no
             FROM kot_orders k
             LEFT JOIN restaurant_tables t ON k.table_id = t.id
-            WHERE k.status IN ('pending', 'preparing')
+            WHERE k.status IN ('pending', 'preparing') AND k.shop_id = ?
             HAVING mins_old > 20
             ORDER BY mins_old DESC
-        `);
+        `, [req.shopId]);
 
         kitchenAlerts.forEach(k => {
             alerts.kitchen.push({
@@ -623,10 +668,10 @@ exports.getAlerts = async (req, res) => {
         const [supplierAlerts] = await db.query(`
             SELECT id, name, current_balance 
             FROM suppliers 
-            WHERE current_balance > 0 AND status = 'active'
+            WHERE current_balance > 0 AND status = 'active' AND shop_id = ?
             ORDER BY current_balance DESC
             LIMIT 5
-        `);
+        `, [req.shopId]);
 
         supplierAlerts.forEach(s => {
             alerts.suppliers.push({
@@ -642,9 +687,10 @@ exports.getAlerts = async (req, res) => {
             SELECT s.id, s.start_time, u.name as user_name, TIMESTAMPDIFF(HOUR, s.start_time, NOW()) as hours_open, s.difference, s.status
             FROM shifts s
             JOIN users u ON s.user_id = u.id
-            WHERE s.status = 'open' 
-            OR (s.status = 'closed' AND ABS(s.difference) > 0 AND s.end_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR))
-        `);
+            WHERE (s.status = 'open' 
+            OR (s.status = 'closed' AND ABS(s.difference) > 0 AND s.end_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)))
+            AND s.shop_id = ?
+        `, [req.shopId]);
 
         shiftAlerts.forEach(s => {
             if (s.status === 'open') {
@@ -711,17 +757,28 @@ exports.getBusinessIntelligence = async (req, res) => {
                 SUM(CASE WHEN sale_channel = 'quick_no_receipt' THEN grand_total ELSE 0 END) as quick_retail_revenue
             FROM invoices 
             WHERE DATE(created_at) BETWEEN ? AND ? 
-            AND payment_status != 'cancelled'`,
-            [startDate, endDate]
+            AND payment_status != 'cancelled' AND shop_id = ?`,
+            [startDate, endDate, req.shopId]
         );
 
-        const [nayaResult] = await db.query('SELECT SUM(current_balance) as total_outstanding FROM customers');
+        // Expenses in range
+        const [expenseRows] = await db.query(`
+            SELECT SUM(amount) as total_expenses 
+            FROM expenses 
+            WHERE DATE(expense_date) BETWEEN ? AND ? 
+            AND status = 'active' AND shop_id = ?`,
+            [startDate, endDate, req.shopId]
+        );
+
+        const [nayaResult] = await db.query('SELECT SUM(current_balance) as total_outstanding FROM customers WHERE shop_id = ?', [req.shopId]);
         
         const kpis = kpiRows[0];
+        const total_expenses = parseFloat(expenseRows[0].total_expenses) || 0;
         const credit_outstanding = parseFloat(nayaResult[0].total_outstanding) || 0;
         const sales_revenue = parseFloat(kpis.sales_revenue) || 0;
         const total_orders = kpis.total_orders || 0;
         const average_bill_value = total_orders > 0 ? (sales_revenue / total_orders) : 0;
+        const net_profit = sales_revenue - total_expenses;
 
         // 2. Sales Trend
         const [salesTrend] = await db.query(`
@@ -731,10 +788,10 @@ exports.getBusinessIntelligence = async (req, res) => {
                 SUM(paid_amount) as collected
             FROM invoices
             WHERE DATE(created_at) BETWEEN ? AND ?
-            AND payment_status != 'cancelled'
+            AND payment_status != 'cancelled' AND shop_id = ?
             GROUP BY DATE(created_at)
             ORDER BY DATE(created_at) ASC
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         // 3. Order Type Breakdown
         const [orderTypeBreakdown] = await db.query(`
@@ -746,24 +803,38 @@ exports.getBusinessIntelligence = async (req, res) => {
                 SUM(grand_total) as value
             FROM invoices
             WHERE DATE(created_at) BETWEEN ? AND ?
-            AND payment_status != 'cancelled'
+            AND payment_status != 'cancelled' AND shop_id = ?
             GROUP BY name
-        `, [startDate, endDate]);
-
+        `, [startDate, endDate, req.shopId]);
         // 4. Top Items
         const [topItems] = await db.query(`
             SELECT 
                 item_name as name, 
-                SUM(qty) as qty,
+                SUM(qty) as qty, 
                 SUM(total) as revenue
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
             WHERE DATE(i.created_at) BETWEEN ? AND ?
-            AND i.payment_status != 'cancelled'
+            AND i.payment_status != 'cancelled' AND i.shop_id = ?
             GROUP BY item_id, item_name
             ORDER BY revenue DESC
             LIMIT 10
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
+
+        // 4.1 Worst Selling Items (Items with 0 sales in period, or lowest sales)
+        const [worstItems] = await db.query(`
+            SELECT 
+                i.name as name, 
+                COALESCE(SUM(ii.qty), 0) as qty,
+                COALESCE(SUM(ii.total), 0) as revenue
+            FROM items i
+            LEFT JOIN invoice_items ii ON i.id = ii.item_id 
+            LEFT JOIN invoices inv ON ii.invoice_id = inv.id AND DATE(inv.created_at) BETWEEN ? AND ? AND inv.payment_status != 'cancelled'
+            WHERE i.shop_id = ? AND i.status = 'active'
+            GROUP BY i.id, i.name
+            ORDER BY revenue ASC, qty ASC
+            LIMIT 10
+        `, [startDate, endDate, req.shopId]);
 
         // 5. Category Performance
         const [categoryPerformance] = await db.query(`
@@ -774,10 +845,10 @@ exports.getBusinessIntelligence = async (req, res) => {
             JOIN items i ON ii.item_id = i.id
             JOIN invoices inv ON ii.invoice_id = inv.id
             WHERE DATE(inv.created_at) BETWEEN ? AND ?
-            AND inv.payment_status != 'cancelled'
+            AND inv.payment_status != 'cancelled' AND inv.shop_id = ?
             GROUP BY name
             ORDER BY value DESC
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         // 6. Hourly Sales
         const [hourlyRaw] = await db.query(`
@@ -787,10 +858,10 @@ exports.getBusinessIntelligence = async (req, res) => {
                 SUM(grand_total) as revenue
             FROM invoices
             WHERE DATE(created_at) BETWEEN ? AND ?
-            AND payment_status != 'cancelled'
+            AND payment_status != 'cancelled' AND shop_id = ?
             GROUP BY hour
             ORDER BY hour ASC
-        `, [startDate, endDate]);
+        `, [startDate, endDate, req.shopId]);
 
         const hourly_sales = Array.from({ length: 24 }, (_, i) => {
             const found = hourlyRaw.find(h => h.hour === i);
@@ -805,16 +876,16 @@ exports.getBusinessIntelligence = async (req, res) => {
         const [topDebtors] = await db.query(`
             SELECT name, current_balance as balance, credit_limit 
             FROM customers 
-            WHERE current_balance > 0 
+            WHERE current_balance > 0 AND shop_id = ?
             ORDER BY balance DESC 
             LIMIT 5
-        `);
+        `, [req.shopId]);
 
         const [overLimit] = await db.query(`
             SELECT name, current_balance as balance, credit_limit 
             FROM customers 
-            WHERE current_balance > credit_limit AND credit_limit > 0
-        `);
+            WHERE current_balance > credit_limit AND credit_limit > 0 AND shop_id = ?
+        `, [req.shopId]);
 
         // 8. Kitchen Performance
         const [kitchenStats] = await db.query(`
@@ -822,17 +893,17 @@ exports.getBusinessIntelligence = async (req, res) => {
                 AVG(TIMESTAMPDIFF(MINUTE, created_at, updated_at)) as avg_time,
                 COUNT(CASE WHEN TIMESTAMPDIFF(MINUTE, created_at, updated_at) > 30 AND status = 'ready' THEN 1 END) as delayed_count
             FROM kot_orders
-            WHERE status != 'cancelled' AND DATE(created_at) BETWEEN ? AND ?
-        `, [startDate, endDate]);
+            WHERE status != 'cancelled' AND DATE(created_at) BETWEEN ? AND ? AND shop_id = ?
+        `, [startDate, endDate, req.shopId]);
 
         const [slowestOrders] = await db.query(`
             SELECT kot_no, TIMESTAMPDIFF(MINUTE, created_at, NOW()) as mins_old
             FROM kot_orders
             WHERE status IN ('pending', 'preparing')
-            AND DATE(created_at) = CURDATE()
+            AND DATE(created_at) = CURDATE() AND shop_id = ?
             ORDER BY mins_old DESC
             LIMIT 5
-        `);
+        `, [req.shopId]);
 
         // 9. Quick Retail
         const [quickRetailStats] = await db.query(`
@@ -842,8 +913,8 @@ exports.getBusinessIntelligence = async (req, res) => {
             FROM invoices
             WHERE sale_channel = 'quick_no_receipt'
             AND DATE(created_at) BETWEEN ? AND ?
-            AND payment_status != 'cancelled'
-        `, [startDate, endDate]);
+            AND payment_status != 'cancelled' AND shop_id = ?
+        `, [startDate, endDate, req.shopId]);
 
         // 10. Suppliers
         const [supplierStats] = await db.query(`
@@ -851,23 +922,24 @@ exports.getBusinessIntelligence = async (req, res) => {
                 SUM(current_balance) as total_payable,
                 COUNT(CASE WHEN current_balance > 0 THEN 1 END) as active_debtors
             FROM suppliers
-        `);
+            WHERE shop_id = ?
+        `, [req.shopId]);
 
         const [topSuppliers] = await db.query(`
             SELECT name, current_balance as balance 
             FROM suppliers 
-            WHERE current_balance > 0 
+            WHERE current_balance > 0 AND shop_id = ?
             ORDER BY balance DESC 
             LIMIT 5
-        `);
+        `, [req.shopId]);
 
         // 11. Stock Risk
         const [lowStock] = await db.query(`
             SELECT name, stock_qty, low_stock_threshold 
             FROM items 
-            WHERE track_stock = 1 AND stock_qty <= low_stock_threshold AND status = 'active'
+            WHERE track_stock = 1 AND stock_qty <= low_stock_threshold AND status = 'active' AND shop_id = ?
             ORDER BY stock_qty ASC
-        `);
+        `, [req.shopId]);
 
         // Insights Generation
         const insights = [];
@@ -894,6 +966,8 @@ exports.getBusinessIntelligence = async (req, res) => {
                 range: { from: startDate, to: endDate },
                 kpis: {
                     sales_revenue,
+                    total_expenses,
+                    net_profit,
                     cash_collected: parseFloat(kpis.cash_collected) || 0,
                     credit_outstanding,
                     average_bill_value,
@@ -903,6 +977,7 @@ exports.getBusinessIntelligence = async (req, res) => {
                 sales_trend: salesTrend,
                 order_type_breakdown: orderTypeBreakdown,
                 top_items: topItems,
+                worst_items: worstItems,
                 category_performance: categoryPerformance,
                 hourly_sales,
                 naya_risk: {

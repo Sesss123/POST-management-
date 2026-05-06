@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 // @access  Private/Admin
 exports.getUsers = async (req, res) => {
     try {
-        const [users] = await db.query('SELECT id, name, email, role, status, created_at FROM users ORDER BY name ASC');
+        const [users] = await db.query('SELECT id, name, email, role, status, created_at FROM users WHERE shop_id = ? AND role != "super_admin" ORDER BY name ASC', [req.shopId]);
         res.json({ success: true, data: users });
     } catch (error) {
         console.error(error);
@@ -30,8 +30,8 @@ exports.createUser = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const [result] = await db.query(
-            'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-            [name, email, hashedPassword, role || 'cashier']
+            'INSERT INTO users (name, email, password, role, shop_id) VALUES (?, ?, ?, ?, ?)',
+            [name, email, hashedPassword, role || 'cashier', req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -53,16 +53,16 @@ exports.createUser = async (req, res) => {
 exports.updateUserStatus = async (req, res) => {
     const { status } = req.body;
     try {
-        const [oldUser] = await db.query('SELECT status, role FROM users WHERE id = ?', [req.params.id]);
+        const [oldUser] = await db.query('SELECT status, role FROM users WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
         if (oldUser.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
 
-        await db.query('UPDATE users SET status = ? WHERE id = ?', [status, req.params.id]);
+        await db.query('UPDATE users SET status = ? WHERE id = ? AND shop_id = ?', [status, req.params.id, req.shopId]);
         
         const action = status === 'active' ? 'user_reactivated' : 'user_deactivated';
         const { logAction } = require('../utils/logger');
         await logAction(req.user.id, action, 'user', req.params.id, { status: oldUser[0].status }, { status });
 
-        const [updatedUser] = await db.query('SELECT id, name, email, role, status FROM users WHERE id = ?', [req.params.id]);
+        const [updatedUser] = await db.query('SELECT id, name, email, role, status FROM users WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
         res.json({ success: true, message: 'User status updated', data: updatedUser[0] });
     } catch (error) {
         console.error(error);
@@ -75,7 +75,7 @@ exports.updateUserStatus = async (req, res) => {
 // @access  Private/Admin,Manager,Cashier
 exports.getWaiters = async (req, res) => {
     try {
-        const [waiters] = await db.query('SELECT id, name FROM users WHERE role IN ("cashier", "admin") AND status = "active" ORDER BY name ASC');
+        const [waiters] = await db.query('SELECT id, name FROM users WHERE role IN ("cashier", "admin") AND status = "active" AND shop_id = ? ORDER BY name ASC', [req.shopId]);
         res.json({ success: true, data: waiters });
     } catch (error) {
         console.error(error);

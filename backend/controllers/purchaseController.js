@@ -20,9 +20,9 @@ exports.getPurchases = async (req, res) => {
             SELECT p.*, s.name as supplier_name 
             FROM purchases p 
             JOIN suppliers s ON p.supplier_id = s.id 
-            WHERE 1=1
+            WHERE p.shop_id = ?
         `;
-        let params = [];
+        let params = [req.shopId];
 
         if (supplier_id) {
             query += ' AND p.supplier_id = ?';
@@ -68,7 +68,7 @@ exports.createPurchase = async (req, res) => {
         await connection.beginTransaction();
 
         // 1. Validate supplier
-        const [suppliers] = await connection.query('SELECT name, status, current_balance FROM suppliers WHERE id = ?', [supplier_id]);
+        const [suppliers] = await connection.query('SELECT name, status, current_balance FROM suppliers WHERE id = ? AND shop_id = ?', [supplier_id, req.shopId]);
         if (suppliers.length === 0) throw new Error('Supplier not found');
         if (suppliers[0].status !== 'active') throw new Error('Supplier is inactive');
 
@@ -96,25 +96,25 @@ exports.createPurchase = async (req, res) => {
 
         // 3. Insert Purchase
         const [pResult] = await connection.query(
-            `INSERT INTO purchases (purchase_no, supplier_id, purchase_date, subtotal, discount, grand_total, paid_amount, balance_amount, payment_status, note, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [purchase_no, supplier_id, purchase_date, subtotal, disc, grand_total, paid, balance, payment_status, note, req.user.id]
+            `INSERT INTO purchases (purchase_no, supplier_id, purchase_date, subtotal, discount, grand_total, paid_amount, balance_amount, payment_status, note, created_by, shop_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [purchase_no, supplier_id, purchase_date, subtotal, disc, grand_total, paid, balance, payment_status, note, req.user.id, req.shopId]
         );
         const purchaseId = pResult.insertId;
 
         // 4. Insert Purchase Items
         for (const item of processedItems) {
             await connection.query(
-                `INSERT INTO purchase_items (purchase_id, item_id, item_name, qty, unit_cost, total)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [purchaseId, item.item_id || null, item.item_name, item.qty, item.cost, item.total]
+                `INSERT INTO purchase_items (purchase_id, item_id, item_name, qty, unit_cost, total, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [purchaseId, item.item_id || null, item.item_name, item.qty, item.cost, item.total, req.shopId]
             );
 
             // Optional: Stock Integration
             if (item.item_id) {
                 await connection.query(
-                    'UPDATE items SET stock_qty = stock_qty + ? WHERE id = ? AND track_stock = TRUE',
-                    [item.qty, item.item_id]
+                    'UPDATE items SET stock_qty = stock_qty + ? WHERE id = ? AND track_stock = TRUE AND shop_id = ?',
+                    [item.qty, item.item_id, req.shopId]
                 );
             }
         }
@@ -122,23 +122,24 @@ exports.createPurchase = async (req, res) => {
         // 5. Financial Integration (Supplier Account)
         if (balance > 0) {
             const newBalance = parseFloat(suppliers[0].current_balance) + balance;
-            await connection.query('UPDATE suppliers SET current_balance = ? WHERE id = ?', [newBalance, supplier_id]);
+            await connection.query('UPDATE suppliers SET current_balance = ? WHERE id = ? AND shop_id = ?', [newBalance, supplier_id, req.shopId]);
             
             await supplierAccountService.recordPurchaseLedger(connection, {
                 supplierId: supplier_id,
                 purchaseId,
                 amount: balance,
                 newBalance,
-                purchaseNo: purchase_no
+                purchaseNo: purchase_no,
+                shopId: req.shopId
             });
         }
 
         // 6. Record immediate payment if any
         if (paid > 0) {
             await connection.query(
-                `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, payment_method, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [supplier_id, purchaseId, paid, payment_method || 'cash', `Initial payment for ${purchase_no}`, req.user.id]
+                `INSERT INTO supplier_payments (supplier_id, purchase_id, amount, payment_method, note, created_by, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [supplier_id, purchaseId, paid, payment_method || 'cash', `Initial payment for ${purchase_no}`, req.user.id, req.shopId]
             );
         }
 
@@ -166,13 +167,13 @@ exports.getPurchaseDetails = async (req, res) => {
              FROM purchases p
              JOIN suppliers s ON p.supplier_id = s.id
              LEFT JOIN users u ON p.created_by = u.id
-             WHERE p.id = ?`,
-            [req.params.id]
+             WHERE p.id = ? AND p.shop_id = ?`,
+            [req.params.id, req.shopId]
         );
 
         if (purchases.length === 0) return res.status(404).json({ success: false, message: 'Purchase not found' });
 
-        const [items] = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ?', [req.params.id]);
+        const [items] = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ? AND shop_id = ?', [req.params.id, req.shopId]);
         
         const purchase = purchases[0];
         purchase.items = items;

@@ -1,6 +1,7 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
 const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
+const cache = require('../utils/cache');
 
 // @desc    Get all items
 // @route   GET /api/items
@@ -12,8 +13,15 @@ exports.getItems = async (req, res) => {
     } = req.query;
     
     try {
-        let query = 'SELECT * FROM items WHERE 1=1';
-        let params = [];
+        let shopId = req.shopId;
+        
+        // Super Admin override for platform management
+        if (req.user.role === 'super_admin' && req.query.shopId) {
+            shopId = req.query.shopId;
+        }
+
+        let query = 'SELECT * FROM items WHERE shop_id = ?';
+        let params = [shopId];
 
         if (include_inactive !== 'true') {
             query += ' AND status = "active"';
@@ -71,8 +79,8 @@ exports.getItems = async (req, res) => {
 // @access  Private
 exports.getCategories = async (req, res) => {
     try {
-        const [categories] = await db.query('SELECT DISTINCT category FROM items WHERE status = "active" ORDER BY category ASC');
-        const [mainCategories] = await db.query('SELECT DISTINCT main_category FROM items WHERE status = "active" AND main_category IS NOT NULL ORDER BY main_category ASC');
+        const [categories] = await db.query('SELECT DISTINCT category FROM items WHERE status = "active" AND shop_id = ? ORDER BY category ASC', [req.shopId]);
+        const [mainCategories] = await db.query('SELECT DISTINCT main_category FROM items WHERE status = "active" AND main_category IS NOT NULL AND shop_id = ? ORDER BY main_category ASC', [req.shopId]);
         
         res.json({ 
             success: true, 
@@ -97,10 +105,16 @@ exports.createItem = async (req, res) => {
         is_popular, display_order,
         send_to_kitchen, item_type, quick_sale_enabled, age_restricted, requires_age_confirmation, barcode, unit_type,
         no_receipt_default, show_in_quick_bar, purchase_unit_type, units_per_purchase_unit,
-        is_quick_retail, is_restaurant_item, pack_size
+        is_quick_retail, is_restaurant_item, pack_size,
+        show_on_public_menu, public_description, image_url, spice_level, is_veg, is_featured, public_display_order
     } = req.body;
 
     try {
+        let shopId = req.shopId;
+        if (req.user.role === 'super_admin' && req.body.shop_id) {
+            shopId = req.body.shop_id;
+        }
+
         const uuid = generateUuid();
         const [result] = await db.query(
             `INSERT INTO items (
@@ -109,8 +123,9 @@ exports.createItem = async (req, res) => {
                 is_popular, display_order, status, availability_status,
                 send_to_kitchen, item_type, quick_sale_enabled, age_restricted, requires_age_confirmation, barcode, unit_type,
                 no_receipt_default, show_in_quick_bar, purchase_unit_type, units_per_purchase_unit,
-                is_quick_retail, is_restaurant_item, pack_size
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'available', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                is_quick_retail, is_restaurant_item, pack_size,
+                show_on_public_menu, public_description, image_url, spice_level, is_veg, is_featured, public_display_order, shop_id
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'available', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 uuid, name, short_code || null, category, main_category || null, portion_type || 'regular', 
                 parseFloat(price), portion_label, description, track_stock ? 1 : 0, 
@@ -129,14 +144,27 @@ exports.createItem = async (req, res) => {
                 parseInt(units_per_purchase_unit) || 1,
                 is_quick_retail ? 1 : 0,
                 is_restaurant_item !== undefined ? (is_restaurant_item ? 1 : 0) : 1,
-                parseInt(pack_size) || parseInt(units_per_purchase_unit) || 20
+                parseInt(pack_size) || parseInt(units_per_purchase_unit) || 20,
+                show_on_public_menu !== undefined ? (show_on_public_menu ? 1 : 0) : 1,
+                public_description || null,
+                image_url || null,
+                spice_level || 'none',
+                is_veg ? 1 : 0,
+                is_featured ? 1 : 0,
+                parseInt(public_display_order) || 0,
+                shopId
             ]
         );
         
         const itemId = result.insertId;
         await logAction(req.user.id, 'item_created', 'item', itemId, null, { ...req.body, uuid });
 
-        const [newItem] = await db.query('SELECT * FROM items WHERE id = ?', [itemId]);
+        const [newItem] = await db.query('SELECT * FROM items WHERE id = ? AND shop_id = ?', [itemId, shopId]);
+        
+        // Invalidate public menu cache for this shop
+        cache.delByPrefix(`publicMenu:${shopId}`);
+        cache.delByPrefix(`publicMenuTable:${shopId}`);
+
         res.status(201).json({ success: true, data: newItem[0] });
     } catch (error) {
         console.error(error);
@@ -154,7 +182,8 @@ exports.updateItem = async (req, res) => {
         status, availability_status, is_popular, display_order,
         send_to_kitchen, item_type, quick_sale_enabled, age_restricted, requires_age_confirmation, barcode, unit_type,
         no_receipt_default, show_in_quick_bar, purchase_unit_type, units_per_purchase_unit,
-        is_quick_retail, is_restaurant_item, pack_size
+        is_quick_retail, is_restaurant_item, pack_size,
+        show_on_public_menu, public_description, image_url, spice_level, is_veg, is_featured, public_display_order
     } = req.body;
 
     try {
@@ -172,8 +201,9 @@ exports.updateItem = async (req, res) => {
                 requires_age_confirmation = ?, barcode = ?, unit_type = ?,
                 no_receipt_default = ?, show_in_quick_bar = ?,
                 purchase_unit_type = ?, units_per_purchase_unit = ?,
-                is_quick_retail = ?, is_restaurant_item = ?, pack_size = ?
-             WHERE id = ?`,
+                is_quick_retail = ?, is_restaurant_item = ?, pack_size = ?,
+                show_on_public_menu = ?, public_description = ?, image_url = ?, spice_level = ?, is_veg = ?, is_featured = ?, public_display_order = ?
+             WHERE id = ? AND shop_id = ?`,
             [
                 name, short_code || null, category, main_category || null, portion_type || 'regular', 
                 parseFloat(price), portion_label, description, track_stock ? 1 : 0, 
@@ -193,13 +223,26 @@ exports.updateItem = async (req, res) => {
                 is_quick_retail ? 1 : 0,
                 is_restaurant_item !== undefined ? (is_restaurant_item ? 1 : 0) : 1,
                 parseInt(pack_size) || parseInt(units_per_purchase_unit) || 20,
-                itemId
+                show_on_public_menu !== undefined ? (show_on_public_menu ? 1 : 0) : 1,
+                public_description || null,
+                image_url || null,
+                spice_level || 'none',
+                is_veg ? 1 : 0,
+                is_featured ? 1 : 0,
+                parseInt(public_display_order) || 0,
+                itemId,
+                req.shopId
             ]
         );
         
         await logAction(req.user.id, 'item_updated', 'item', itemId, oldItem[0], req.body);
 
-        const [updatedItem] = await db.query('SELECT * FROM items WHERE id = ?', [itemId]);
+        const [updatedItem] = await db.query('SELECT * FROM items WHERE id = ? AND shop_id = ?', [itemId, req.shopId]);
+        
+        // Invalidate public menu cache for this shop
+        cache.delByPrefix(`publicMenu:${req.shopId}`);
+        cache.delByPrefix(`publicMenuTable:${req.shopId}`);
+
         res.json({ success: true, message: 'Item updated successfully', data: updatedItem[0] });
     } catch (error) {
         console.error(error);
@@ -214,13 +257,17 @@ exports.updatePrice = async (req, res) => {
     const { price } = req.body;
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldItem] = await db.query(`SELECT id, price FROM items WHERE ${where.query}`, [where.value]);
+        const [oldItem] = await db.query(`SELECT id, price FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldItem.length === 0) return res.status(404).json({ success: false, message: 'Item not found' });
         const itemId = oldItem[0].id;
 
-        await db.query('UPDATE items SET price = ? WHERE id = ?', [parseFloat(price), itemId]);
+        await db.query('UPDATE items SET price = ? WHERE id = ? AND shop_id = ?', [parseFloat(price), itemId, req.shopId]);
         
         await logAction(req.user.id, 'item_price_changed', 'item', itemId, { price: oldItem[0].price }, { price: parseFloat(price) });
+
+        // Invalidate public menu cache for this shop
+        cache.delByPrefix(`publicMenu:${req.shopId}`);
+        cache.delByPrefix(`publicMenuTable:${req.shopId}`);
 
         res.json({ success: true, message: 'Price updated' });
     } catch (error) {
@@ -236,16 +283,20 @@ exports.updateAvailability = async (req, res) => {
     const { availability_status, reason } = req.body;
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldItem] = await db.query(`SELECT id, availability_status FROM items WHERE ${where.query}`, [where.value]);
+        const [oldItem] = await db.query(`SELECT id, availability_status FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldItem.length === 0) return res.status(404).json({ success: false, message: 'Item not found' });
         const itemId = oldItem[0].id;
 
-        await db.query('UPDATE items SET availability_status = ? WHERE id = ?', [availability_status, itemId]);
+        await db.query('UPDATE items SET availability_status = ? WHERE id = ? AND shop_id = ?', [availability_status, itemId, req.shopId]);
         
         await logAction(req.user.id, 'item_availability_changed', 'item', itemId, 
             { status: oldItem[0].availability_status }, 
             { status: availability_status, reason }
         );
+
+        // Invalidate public menu cache for this shop
+        cache.delByPrefix(`publicMenu:${req.shopId}`);
+        cache.delByPrefix(`publicMenuTable:${req.shopId}`);
 
         res.json({ success: true, message: `Item marked as ${availability_status.replace('_', ' ')}` });
     } catch (error) {
@@ -261,11 +312,11 @@ exports.updateStatus = async (req, res) => {
     const { status } = req.body;
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldItem] = await db.query(`SELECT id, status FROM items WHERE ${where.query}`, [where.value]);
+        const [oldItem] = await db.query(`SELECT id, status FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldItem.length === 0) return res.status(404).json({ success: false, message: 'Item not found' });
         const itemId = oldItem[0].id;
 
-        await db.query('UPDATE items SET status = ? WHERE id = ?', [status, itemId]);
+        await db.query('UPDATE items SET status = ? WHERE id = ? AND shop_id = ?', [status, itemId, req.shopId]);
         
         const action = status === 'active' ? 'item_reactivated' : 'item_deactivated';
         await logAction(req.user.id, action, 'item', itemId, { status: oldItem[0].status }, { status });
@@ -295,7 +346,7 @@ exports.updateUsability = async (req, res) => {
         if (display_order !== undefined) { updates.push('display_order = ?'); params.push(display_order); }
 
         if (updates.length > 0) {
-            await db.query(`UPDATE items SET ${updates.join(', ')} WHERE id = ?`, [...params, itemId]);
+            await db.query(`UPDATE items SET ${updates.join(', ')} WHERE id = ? AND shop_id = ?`, [...params, itemId, req.shopId]);
             await logAction(req.user.id, 'item_usability_updated', 'item', itemId, oldItem[0], req.body);
         }
 
@@ -312,14 +363,18 @@ exports.updateUsability = async (req, res) => {
 exports.deleteItem = async (req, res) => {
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldItem] = await db.query(`SELECT id FROM items WHERE ${where.query}`, [where.value]);
+        const [oldItem] = await db.query(`SELECT id FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldItem.length === 0) return res.status(404).json({ success: false, message: 'Item not found' });
         const itemId = oldItem[0].id;
 
-        const [result] = await db.query('UPDATE items SET status = "inactive" WHERE id = ?', [itemId]);
+        const [result] = await db.query('UPDATE items SET status = "inactive" WHERE id = ? AND shop_id = ?', [itemId, req.shopId]);
         
         await logAction(req.user.id, 'item_deactivated', 'item', itemId, null, { status: 'inactive', method: 'soft_delete' });
         
+        // Invalidate public menu cache for this shop
+        cache.delByPrefix(`publicMenu:${req.shopId}`);
+        cache.delByPrefix(`publicMenuTable:${req.shopId}`);
+
         res.json({ success: true, message: 'Item deactivated' });
     } catch (error) {
         console.error(error);
@@ -346,7 +401,7 @@ exports.receiveStock = async (req, res) => {
 
         const where = buildIdOrUuidWhere(null, req.params.id);
         // 1. Fetch item to verify it exists
-        const [items] = await connection.query(`SELECT * FROM items WHERE ${where.query}`, [where.value]);
+        const [items] = await connection.query(`SELECT * FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (items.length === 0) {
             connection.release();
             return res.status(404).json({ success: false, message: 'Item not found' });
@@ -362,19 +417,19 @@ exports.receiveStock = async (req, res) => {
         await connection.query(
             `INSERT INTO retail_stock_receipts (
                 item_id, purchase_unit_type, purchase_unit_qty, units_per_purchase_unit, 
-                total_units_added, cost_per_purchase_unit, note, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                total_units_added, cost_per_purchase_unit, note, created_by, shop_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 itemId, purchase_unit_type, parseFloat(purchase_unit_qty), conversionFactor,
                 totalUnitsAdded, cost_per_purchase_unit ? parseFloat(cost_per_purchase_unit) : null,
-                note || null, req.user.id
+                note || null, req.user.id, req.shopId
             ]
         );
 
         // 4. Update item stock
         await connection.query(
-            'UPDATE items SET stock_qty = stock_qty + ?, track_stock = 1 WHERE id = ?',
-            [totalUnitsAdded, itemId]
+            'UPDATE items SET stock_qty = stock_qty + ?, track_stock = 1 WHERE id = ? AND shop_id = ?',
+            [totalUnitsAdded, itemId, req.shopId]
         );
 
         await connection.commit();

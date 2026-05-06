@@ -13,6 +13,8 @@ router.post('/', customerController.createCustomer);
 router.put('/:id', customerController.updateCustomer);
 router.get('/:id/ledger', customerController.getCustomerLedger);
 router.get('/:id/account', customerController.getAccountDetails);
+router.get('/:id/loyalty', customerController.getLoyaltyHistory);
+router.post('/:id/loyalty/adjust', authorize('admin'), customerController.adjustLoyaltyPoints);
 router.patch('/:id/status', authorize('admin'), customerController.updateCustomerStatus);
 
 module.exports = router;

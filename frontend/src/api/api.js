@@ -24,6 +24,8 @@ export const customerApi = {
     getDebtors: (params) => apiClient.get('/customers/debtors', { params }),
     getLedger: (id) => apiClient.get(`/customers/${id}/ledger`),
     getAccount: (id) => apiClient.get(`/customers/${id}/account`),
+    getLoyaltyHistory: (id) => apiClient.get(`/customers/${id}/loyalty`),
+    adjustLoyalty: (id, data) => apiClient.post(`/customers/${id}/loyalty/adjust`, data),
     create: (data) => apiClient.post('/customers', data),
     update: (id, data) => apiClient.put(`/customers/${id}`, data)
 };
@@ -82,7 +84,8 @@ export const sessionApi = {
     addToCredit: (id, payload) => apiClient.post(`/table-sessions/${id}/final-bill/add-to-credit`, payload),
     splitBill: (id, payload) => apiClient.post(`/table-sessions/${id}/split-bill`, payload),
     transferTable: (id, payload) => apiClient.post(`/table-sessions/${id}/transfer`, payload),
-    mergeTable: (id, payload) => apiClient.post(`/table-sessions/${id}/merge`, payload)
+    mergeTable: (id, payload) => apiClient.post(`/table-sessions/${id}/merge`, payload),
+    cancel: (id) => apiClient.delete(`/table-sessions/${id}`)
 };
 
 export const kotApi = {
@@ -93,7 +96,8 @@ export const kotApi = {
     create: (data) => apiClient.post('/kot/create', data),
     createFromSession: (sessionId) => apiClient.post(`/table-sessions/${sessionId}/send-kot`, {}),
     updateStatus: (id, status) => apiClient.patch(`/kot/${id}/status`, { status }),
-    updateItemStatus: (id, status) => apiClient.patch(`/kot/items/${id}/status`, { status })
+    updateItemStatus: (id, status) => apiClient.patch(`/kot/items/${id}/status`, { status }),
+    createFromInvoice: (invoiceId) => apiClient.post(`/kot/invoice/${invoiceId}/send-kot`, {})
 };
 
 export const shiftApi = {
@@ -122,9 +126,14 @@ export const settingApi = {
 
 export const reservationApi = {
     getAll: (params) => apiClient.get('/reservations', { params }),
+    getDetails: (id) => apiClient.get(`/reservations/${id}`),
     create: (data) => apiClient.post('/reservations', data),
+    update: (id, data) => apiClient.put(`/reservations/${id}`, data),
     updateStatus: (id, status) => apiClient.patch(`/reservations/${id}/status`, { status }),
-    assignTable: (id, tableId) => apiClient.patch(`/reservations/${id}/assign-table`, { table_id: tableId })
+    assignTable: (id, tableId) => apiClient.patch(`/reservations/${id}/assign-table`, { table_id: tableId }),
+    seat: (id, data) => apiClient.post(`/reservations/${id}/seat`, data),
+    cancel: (id, reason) => apiClient.patch(`/reservations/${id}/cancel`, { reason }),
+    markNoShow: (id) => apiClient.patch(`/reservations/${id}/no-show`)
 };
 
 export const promotionApi = {
@@ -168,6 +177,66 @@ export const kitchenApi = {
     updateItemStatus: (itemId, status) => apiClient.patch(`/kitchen/kot-items/${itemId}/status`, { status })
 };
 
+export const gatewayPaymentApi = {
+    createQR: (data) => apiClient.post('/payments/gateway/qr/create', data),
+    getStatus: (uuid) => apiClient.get(`/payments/gateway/transactions/${uuid}/status`),
+    cancel: (uuid) => apiClient.post(`/payments/gateway/transactions/${uuid}/cancel`),
+    mockMarkPaid: (uuid) => apiClient.post(`/payments/gateway/mock/${uuid}/mark-paid`)
+};
+
+export const expenseApi = {
+    getAll: (params) => apiClient.get('/expenses', { params }),
+    getDetails: (id) => apiClient.get(`/expenses/${id}`),
+    create: (data) => apiClient.post('/expenses', data),
+    update: (id, data) => apiClient.put(`/expenses/${id}`, data),
+    cancel: (id) => apiClient.patch(`/expenses/${id}/cancel`)
+};
+
+export const stockApi = {
+    getLowStock: () => apiClient.get('/stock/low'),
+    adjust: (data) => apiClient.post('/stock/adjust'),
+    getMovements: (itemId) => apiClient.get(`/stock/movements/${itemId}`)
+};
+
+
+export const brandingApi = {
+    getPublicReceipt: (uuid) => apiClient.get(`/public/receipt/${uuid}`)
+};
+
 export const auditApi = {
     getAll: (params) => apiClient.get('/audit-logs', { params })
+};
+
+export const publicMenuApi = {
+    getItems: (params) => apiClient.get('/public-menu/items', { params }),
+    getTableInfo: (tableNo) => apiClient.get(`/public-menu/table/${tableNo}`)
+};
+
+export const superAdminApi = {
+    getStats: () => apiClient.get('/super-admin/overview'),
+    getAnalytics: () => apiClient.get('/super-admin/analytics'),
+    getHealth: () => apiClient.get('/super-admin/health'),
+    getSystemHealth: () => apiClient.get('/super-admin/system-health'),
+    getAuditLogs: (params) => apiClient.get('/super-admin/audit-logs', { params }),
+    
+    // Shops
+    getShops: () => apiClient.get('/super-admin/shops'),
+    createShop: (data) => apiClient.post('/super-admin/shops', data),
+    updateShop: (id, data) => apiClient.put(`/super-admin/shops/${id}`, data),
+    
+    // Subscriptions & Plans
+    getSubscriptions: () => apiClient.get('/super-admin/subscriptions'),
+    getPlans: () => apiClient.get('/super-admin/plans'),
+    createPlan: (data) => apiClient.post('/super-admin/plans', data),
+    updatePlan: (id, data) => apiClient.put(`/super-admin/plans/${id}`, data),
+    deletePlan: (id) => apiClient.delete(`/super-admin/plans/${id}`),
+    
+    // Announcements
+    getAnnouncements: () => apiClient.get('/super-admin/announcements'),
+    createAnnouncement: (data) => apiClient.post('/super-admin/announcements', data),
+    deleteAnnouncement: (id) => apiClient.delete(`/super-admin/announcements/${id}`),
+    
+    // Tickets
+    getTickets: () => apiClient.get('/super-admin/tickets'),
+    updateTicket: (id, data) => apiClient.put(`/super-admin/tickets/${id}`, data)
 };

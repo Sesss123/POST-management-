@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { db } = require('../config/db');
 
 const protect = async (req, res, next) => {
     let token;
@@ -56,4 +57,54 @@ const authorize = (...roles) => {
     };
 };
 
-module.exports = { protect, adminOnly, authorize };
+/**
+ * requirePermission
+ * Checks if user has a specific permission key.
+ * Hierarchy: SuperAdmin -> User Override -> Role Default -> Admin Fallback
+ */
+const requirePermission = (permissionKey) => {
+    return async (req, res, next) => {
+        try {
+            if (req.user.role === 'super_admin') return next();
+
+            // 1. Check User Overrides
+            const [userOverride] = await db.query(`
+                SELECT up.value 
+                FROM user_permissions up
+                JOIN permissions p ON up.permission_id = p.id
+                WHERE up.user_id = ? AND p.perm_key = ? AND up.shop_id = ?
+            `, [req.user.id, permissionKey, req.user.shopId]);
+
+            if (userOverride.length > 0) {
+                if (userOverride[0].value) return next();
+                else return res.status(403).json({ 
+                    success: false, 
+                    message: `Permission denied for: ${permissionKey}` 
+                });
+            }
+
+            // 2. Check Role Defaults
+            const [roleDefault] = await db.query(`
+                SELECT 1 
+                FROM role_permissions rp
+                JOIN permissions p ON rp.permission_id = p.id
+                WHERE rp.role = ? AND p.perm_key = ? AND rp.shop_id = ?
+            `, [req.user.role, permissionKey, req.user.shopId]);
+
+            if (roleDefault.length > 0) return next();
+
+            // 3. Fallback: Shop Admin has everything unless explicitly denied above
+            if (req.user.role === 'admin') return next();
+
+            return res.status(403).json({ 
+                success: false, 
+                message: `You do not have permission to: ${permissionKey}` 
+            });
+        } catch (error) {
+            console.error('[requirePermission Error]', error);
+            res.status(500).json({ success: false, message: 'Internal permission check error' });
+        }
+    };
+};
+
+module.exports = { protect, adminOnly, authorize, requirePermission };

@@ -17,7 +17,12 @@ import {
 import { AppButton, AppModal, FormInput, useToast } from '../ui';
 import { cn } from '../../utils/cn';
 
-const AddToCustomerAccountModal = ({ isOpen, onClose, billAmount, onConfirm, processing }) => {
+const AddToCustomerAccountModal = ({ 
+    isOpen, onClose, billAmount, onConfirm, processing, 
+    title = "Add to Customer Account", 
+    description = "Record this bill as credit in the customer's Naya Book",
+    confirmText = "Confirm Add to Account" 
+}) => {
   const toast = useToast();
   const [search, setSearch] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -91,7 +96,7 @@ const AddToCustomerAccountModal = ({ isOpen, onClose, billAmount, onConfirm, pro
     if (!selectedCustomer) return;
     if (selectedCustomer.status === 'blocked') return toast.error('This customer account is blocked');
     
-    onConfirm(selectedCustomer.id);
+    onConfirm(selectedCustomer);
   };
 
   const newBalance = selectedCustomer ? parseFloat(selectedCustomer.current_balance) + billAmount : 0;
@@ -101,8 +106,8 @@ const AddToCustomerAccountModal = ({ isOpen, onClose, billAmount, onConfirm, pro
     <AppModal
       isOpen={isOpen}
       onClose={onClose}
-      title="Add to Customer Account"
-      description="Record this bill as credit in the customer's Naya Book"
+      title={title}
+      description={description}
       size="md"
     >
       <div className="space-y-6 py-2">
@@ -225,7 +230,7 @@ const AddToCustomerAccountModal = ({ isOpen, onClose, billAmount, onConfirm, pro
                         disabled={!selectedCustomer || processing}
                         loading={processing}
                     >
-                        Confirm Add to Account
+                        {confirmText}
                     </AppButton>
                 </div>
             </>

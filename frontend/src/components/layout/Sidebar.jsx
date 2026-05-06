@@ -22,13 +22,27 @@ import {
   Truck,
   X,
   Utensils,
-  LineChart
+  LineChart,
+  Lock,
+  Wallet,
+  Megaphone
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useSettings } from '../../context/SettingsContext';
+import { useSubscription } from '../../context/SubscriptionContext';
 import { cn } from '../../utils/cn';
 
-const SidebarLink = ({ item, onClick, isActive }) => (
+const SidebarLink = ({ item, onClick, isActive, isBlocked }) => (
+  isBlocked ? (
+    <div
+      title="Renew subscription to unlock"
+      className="flex items-center gap-4 px-6 py-4 rounded-2xl text-sm font-bold opacity-30 cursor-not-allowed select-none text-slate-600"
+    >
+      <item.icon size={20} />
+      {item.label}
+      <Lock size={13} className="ml-auto" />
+    </div>
+  ) : (
   <NavLink
     to={item.path}
     onClick={onClick}
@@ -45,63 +59,68 @@ const SidebarLink = ({ item, onClick, isActive }) => (
         <div className="absolute right-0 top-0 bottom-0 w-1 bg-white/20 rounded-l-full" />
     )}
   </NavLink>
+  )
 );
 
 const Sidebar = ({ mobile, onClose }) => {
   const { user, logout } = useAuth();
   const { settings } = useSettings();
+  const { isFeatureBlocked } = useSubscription();
   const navigate = useNavigate();
   const location = useLocation();
 
   const navigationGroups = [
     {
-      title: 'Main',
+      title: t('common.main'),
       items: [
-        { label: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'cashier', 'kitchen'] },
+        { label: t('common.dashboard'), path: '/', icon: LayoutDashboard, roles: ['admin', 'cashier', 'kitchen'] },
       ]
     },
     {
-      title: 'Sales & Billing',
+      title: t('common.sales_billing'),
       items: [
-        { label: 'Cash Sale', path: '/cash-sale', icon: ShoppingCart, roles: ['cashier'] },
-        { label: 'Table Billing', path: '/table-billing', icon: Utensils, roles: ['cashier', 'waiter'] },
-        { label: 'Invoices', path: '/invoices', icon: Receipt, roles: ['admin', 'cashier'] },
-        { label: 'Held Bills', path: '/held-bills', icon: PauseCircle, roles: ['admin', 'cashier'], enabled: settings.held_bills_enabled },
-        { label: 'KOT Orders', path: '/kot-orders', icon: History, roles: ['admin', 'cashier', 'waiter'], enabled: settings.kot_enabled },
+        { label: t('common.cash_sale'), path: '/cash-sale', icon: ShoppingCart, roles: ['cashier'] },
+        { label: t('common.table_billing'), path: '/table-billing', icon: Grid3X3, roles: ['admin', 'cashier', 'waiter'] },
+        { label: t('common.delivery_hub'), path: '/delivery-orders', icon: Truck, roles: ['admin', 'cashier'] },
+        { label: t('common.kitchen'), path: '/kitchen', icon: Utensils, roles: ['admin', 'kitchen'] },
+        { label: t('common.held_bills'), path: '/held-bills', icon: PauseCircle, roles: ['admin', 'cashier'], enabled: settings.held_bills_enabled },
+        { label: t('common.kot_orders'), path: '/kot-orders', icon: History, roles: ['admin', 'cashier', 'waiter'], enabled: settings.kot_enabled },
       ]
     },
     {
-      title: 'Operations',
+      title: t('common.operations'),
       items: [
-        { label: 'Kitchen KDS', path: '/kitchen', icon: ChefHat, roles: ['admin', 'kitchen'] },
-        { label: 'Reservations', path: '/reservations', icon: Calendar, roles: ['cashier'], enabled: settings.reservations_enabled },
-        { label: 'User Shifts', path: '/shifts', icon: Clock, roles: ['admin', 'cashier'], enabled: settings.shift_system_enabled },
+        { label: t('common.kitchen_kds'), path: '/kitchen', icon: ChefHat, roles: ['admin', 'kitchen'] },
+        { label: t('common.reservations'), path: '/reservations', icon: Calendar, roles: ['admin', 'cashier'], enabled: settings.reservations_enabled },
+        { label: t('common.user_shifts'), path: '/shifts', icon: Clock, roles: ['admin', 'cashier'], enabled: settings.shift_system_enabled },
+        { label: t('common.expenses'), path: '/expenses', icon: Wallet, roles: ['admin', 'cashier'] },
       ]
     },
     {
-      title: 'Credit Management',
+      title: t('common.credit_management'),
       items: [
-        { label: 'Naya Book', path: '/naya-book', icon: BookOpen, roles: ['admin', 'cashier'], enabled: settings.naya_book_enabled },
-        { label: 'Customers', path: '/customers', icon: Users, roles: ['admin', 'cashier'] },
+        { label: t('common.naya_book'), path: '/naya-book', icon: BookOpen, roles: ['admin', 'cashier'], enabled: settings.naya_book_enabled },
+        { label: t('common.customers'), path: '/customers', icon: Users, roles: ['admin', 'cashier'] },
       ]
     },
     {
-      title: 'Inventory & Setup',
+      title: t('common.inventory_setup'),
       items: [
-        { label: 'Menu Items', path: '/items', icon: Package, roles: ['admin'] },
-        { label: 'Tables', path: '/tables', icon: Grid3X3, roles: ['admin'] },
-        { label: 'Suppliers', path: '/suppliers', icon: Truck, roles: ['admin'] },
-        { label: 'Stock/Purchases', path: '/purchases', icon: Package, roles: ['admin'] },
+        { label: t('common.menu_items'), path: '/items', icon: Package, roles: ['admin'] },
+        { label: t('common.tables'), path: '/tables', icon: Grid3X3, roles: ['admin'] },
+        { label: t('common.suppliers'), path: '/suppliers', icon: Truck, roles: ['admin'] },
+        { label: t('common.stock_purchases'), path: '/purchases', icon: Package, roles: ['admin'] },
       ]
     },
     {
-      title: 'Admin & Reports',
+      title: t('common.admin_reports'),
       items: [
-        { label: 'Business Intelligence', path: '/business-intelligence', icon: LineChart, roles: ['admin'] },
-        { label: 'Reports', path: '/reports', icon: BarChart3, roles: ['admin'] },
-        { label: 'Users', path: '/users', icon: UserCog, roles: ['admin'] },
-        { label: 'Audit Logs', path: '/audit-logs', icon: ShieldCheck, roles: ['admin'] },
-        { label: 'Settings', path: '/settings', icon: Settings, roles: ['admin'] },
+        { label: t('common.business_intelligence'), path: '/business-intelligence', icon: LineChart, roles: ['admin'], featureKey: 'analytics' },
+        { label: t('common.marketing_center'), path: '/marketing', icon: Megaphone, roles: ['admin'] },
+        { label: t('common.reports'), path: '/reports', icon: BarChart3, roles: ['admin'], featureKey: 'reports' },
+        { label: t('common.users'), path: '/users', icon: UserCog, roles: ['admin'], featureKey: 'users_write' },
+        { label: t('common.audit_logs'), path: '/audit-logs', icon: ShieldCheck, roles: ['admin'], featureKey: 'audit-logs' },
+        { label: t('common.settings'), path: '/settings', icon: Settings, roles: ['admin'], featureKey: 'settings_write' },
       ]
     }
   ];
@@ -133,8 +152,8 @@ const Sidebar = ({ mobile, onClose }) => {
                         <Utensils size={24} />
                     </div>
                     <div>
-                        <h1 className="text-xl font-black text-white tracking-tighter uppercase">RestoLedger</h1>
-                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">POS & Credit</p>
+                        <h1 className="text-xl font-black text-white tracking-tighter uppercase">{user?.shopName || 'RestoLedger'}</h1>
+                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{user?.shopName ? 'RestoLedger POS' : 'POS & Credit'}</p>
                     </div>
                 </div>
                 {mobile && (
@@ -153,14 +172,15 @@ const Sidebar = ({ mobile, onClose }) => {
                 {group.title}
               </h3>
               <div className="space-y-1">
-                {group.items.map((item) => (
+              {group.items.map((item) => (
                   <SidebarLink 
                       key={item.path} 
                       item={item} 
                       onClick={onClose} 
                       isActive={location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))}
+                      isBlocked={item.featureKey ? isFeatureBlocked(item.featureKey) : false}
                   />
-                ))}
+              ))}
               </div>
             </div>
           ))}

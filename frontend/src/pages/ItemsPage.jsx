@@ -53,7 +53,14 @@ const ItemsPage = () => {
     units_per_purchase_unit: 1,
     is_quick_retail: false,
     is_restaurant_item: true,
-    pack_size: 20
+    pack_size: 20,
+    show_on_public_menu: true,
+    public_description: '',
+    image_url: '',
+    spice_level: 'none',
+    is_veg: false,
+    is_featured: false,
+    public_display_order: 0
   });
 
   const [showReceiveModal, setShowReceiveModal] = useState(false);
@@ -144,7 +151,14 @@ const ItemsPage = () => {
         units_per_purchase_unit: 1,
         is_quick_retail: false,
         is_restaurant_item: true,
-        pack_size: 20
+        pack_size: 20,
+        show_on_public_menu: true,
+        public_description: '',
+        image_url: '',
+        spice_level: 'none',
+        is_veg: false,
+        is_featured: false,
+        public_display_order: 0
       });
   };
 
@@ -192,7 +206,14 @@ const ItemsPage = () => {
       pack_size: item.pack_size || 20,
       unit_type: item.unit_type || 'item',
       no_receipt_default: item.no_receipt_default === 1 || item.no_receipt_default === true,
-      show_in_quick_bar: item.show_in_quick_bar === 1 || item.show_in_quick_bar === true
+      show_in_quick_bar: item.show_in_quick_bar === 1 || item.show_in_quick_bar === true,
+      show_on_public_menu: item.show_on_public_menu === 1 || item.show_on_public_menu === true,
+      public_description: item.public_description || '',
+      image_url: item.image_url || '',
+      spice_level: item.spice_level || 'none',
+      is_veg: item.is_veg === 1 || item.is_veg === true,
+      is_featured: item.is_featured === 1 || item.is_featured === true,
+      public_display_order: item.public_display_order || 0
     });
     setShowModal(true);
   };
@@ -350,9 +371,9 @@ const ItemsPage = () => {
                         <div className="flex flex-col">
                             <p className="font-black text-slate-900 leading-tight">{item.name}</p>
                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-                                {item.short_code && <span className="text-indigo-600 font-black mr-2">[{item.short_code}]</span>}
+                                {!!item.short_code && item.short_code !== "0" && <span className="text-indigo-600 font-black mr-2">[{item.short_code}]</span>}
                                 {item.portion_label || 'Single'} • {item.status.toUpperCase()}
-                                {item.is_popular && <span className="ml-2 text-amber-500 font-black">★ POPULAR</span>}
+                                {!!item.is_popular && <span className="ml-2 text-amber-500 font-black">★ POPULAR</span>}
                             </p>
                         </div>
                     </td>
@@ -736,6 +757,88 @@ const ItemsPage = () => {
                     </div>
                 )}
             </div>
+
+            {/* Public Menu Section */}
+            <div className="p-5 lg:p-6 bg-white rounded-[28px] lg:rounded-3xl space-y-4 lg:space-y-6 border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <label className="text-[9px] lg:text-[10px] font-black text-indigo-600 uppercase tracking-widest">Digital Menu (QR)</label>
+                        <p className="text-[8px] lg:text-[10px] text-slate-500 font-bold">Public visibility and details</p>
+                    </div>
+                    <button 
+                        type="button"
+                        onClick={() => setFormData({...formData, show_on_public_menu: !formData.show_on_public_menu})}
+                        className={cn("w-12 h-6 lg:w-14 lg:h-7 rounded-full transition-all relative ring-4", formData.show_on_public_menu ? "bg-indigo-600 ring-indigo-100" : "bg-slate-200 ring-slate-50")}
+                    >
+                        <div className={cn("absolute top-1 w-4 h-4 lg:w-5 lg:h-5 bg-white rounded-full shadow-lg transition-all", formData.show_on_public_menu ? "right-1" : "left-1")}></div>
+                    </button>
+                </div>
+
+                {formData.show_on_public_menu && (
+                    <div className="space-y-4 animate-in fade-in duration-300">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <FormInput 
+                                label="Public Display Order" 
+                                type="number" 
+                                value={formData.public_display_order} 
+                                onChange={e => setFormData({...formData, public_display_order: e.target.value})} 
+                            />
+                            <FormSelect 
+                                label="Spice Level"
+                                value={formData.spice_level}
+                                onChange={e => setFormData({...formData, spice_level: e.target.value})}
+                                options={[
+                                    { value: 'none', label: 'None' },
+                                    { value: 'mild', label: 'Mild' },
+                                    { value: 'medium', label: 'Medium' },
+                                    { value: 'spicy', label: 'Spicy' },
+                                    { value: 'extra_spicy', label: 'Extra Spicy' }
+                                ]}
+                            />
+                        </div>
+                        
+                        <div className="flex gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={formData.is_veg} 
+                                    onChange={e => setFormData({...formData, is_veg: e.target.checked})}
+                                    className="w-5 h-5 rounded-lg border-2 border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                />
+                                <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest text-emerald-600">Veg Item</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={formData.is_featured} 
+                                    onChange={e => setFormData({...formData, is_featured: e.target.checked})}
+                                    className="w-5 h-5 rounded-lg border-2 border-slate-300 text-amber-600 focus:ring-amber-500"
+                                />
+                                <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest text-amber-600">Featured</span>
+                            </label>
+                        </div>
+
+                        <FormInput 
+                            label="Public Image URL" 
+                            placeholder="https://example.com/image.jpg" 
+                            value={formData.image_url} 
+                            onChange={e => setFormData({...formData, image_url: e.target.value})} 
+                        />
+                        
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Public Description</label>
+                            <textarea 
+                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm font-bold text-slate-900 outline-none focus:border-indigo-600 h-24 resize-none"
+                                placeholder="Write a customer-friendly description..."
+                                value={formData.public_description}
+                                onChange={e => setFormData({...formData, public_description: e.target.value})}
+                            />
+                        </div>
+                    </div>
+                )}
+            </div>
+
+
 
             <div className="flex gap-4 pt-4">
                 <AppButton variant="secondary" className="flex-1" type="button" onClick={() => setShowModal(false)}>Cancel</AppButton>

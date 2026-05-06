@@ -213,7 +213,7 @@ const DashboardPage = () => {
                 title="Total Cash Collected" 
                 value={`Rs. ${parseFloat(stats?.summary?.todayCash || 0).toLocaleString()}`} 
                 icon={TrendingUp} 
-                variant="primary"
+                variant="success"
             />
             <StatCard 
                 title="Active Sessions" 

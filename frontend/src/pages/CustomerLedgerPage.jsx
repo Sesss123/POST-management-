@@ -35,7 +35,8 @@ const CustomerLedgerPage = () => {
     },
     ledger: [],
     unpaid_invoices: [],
-    payments: []
+    payments: [],
+    loyalty_history: []
   });
   
   const [loading, setLoading] = useState(true);
@@ -44,11 +45,19 @@ const CustomerLedgerPage = () => {
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [settings, setSettings] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [activeTab, setActiveTab] = useState('account'); // 'account' or 'loyalty'
+  const [showAdjustLoyaltyModal, setShowAdjustLoyaltyModal] = useState(false);
   
   const [paymentData, setPaymentData] = useState({
       amount: '',
       method: 'cash',
       note: ''
+  });
+
+  const [loyaltyAdjustData, setLoyaltyAdjustData] = useState({
+      points: '',
+      type: 'add',
+      description: ''
   });
 
   useEffect(() => {
@@ -72,7 +81,11 @@ const CustomerLedgerPage = () => {
     try {
         const { data } = await customerApi.getAccount(id);
         if (data.success) {
-            setAccountData(data.data);
+            const loyaltyRes = await customerApi.getLoyaltyHistory(id);
+            setAccountData({
+                ...data.data,
+                loyalty_history: loyaltyRes.data.data
+            });
         }
     } catch (err) {
         toast.error('Failed to load account details');
@@ -116,6 +129,30 @@ const CustomerLedgerPage = () => {
           fetchAccountDetails();
       } catch (err) {
           toast.error(err.response?.data?.message || 'Payment failed');
+      } finally {
+          setProcessing(false);
+      }
+  };
+
+  const handleAdjustLoyalty = async (e) => {
+      e.preventDefault();
+      const pointsNum = parseFloat(loyaltyAdjustData.points);
+      if (!pointsNum || pointsNum <= 0) return toast.error('Enter a valid points amount');
+      
+      setProcessing(true);
+      try {
+          await customerApi.adjustLoyalty(customer.id, {
+              points: pointsNum,
+              type: loyaltyAdjustData.type,
+              description: loyaltyAdjustData.description
+          });
+          
+          toast.success('Loyalty points adjusted successfully!');
+          setShowAdjustLoyaltyModal(false);
+          setLoyaltyAdjustData({ points: '', type: 'add', description: '' });
+          fetchAccountDetails();
+      } catch (err) {
+          toast.error(err.response?.data?.message || 'Adjustment failed');
       } finally {
           setProcessing(false);
       }
@@ -253,8 +290,32 @@ const CustomerLedgerPage = () => {
               </div>
           </div>
 
-          {/* Tabbed Content */}
-          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 overflow-hidden pb-4">
+          </div>
+
+          {/* Tab Selector */}
+          <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-slate-100 self-start shrink-0">
+              <button 
+                onClick={() => setActiveTab('account')}
+                className={cn(
+                    "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                    activeTab === 'account' ? "bg-slate-900 text-white shadow-lg" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                  Account & Ledger
+              </button>
+              <button 
+                onClick={() => setActiveTab('loyalty')}
+                className={cn(
+                    "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                    activeTab === 'loyalty' ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                  Loyalty & Points
+              </button>
+          </div>
+
+          {activeTab === 'account' ? (
+              <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 overflow-hidden pb-4">
               {/* Left Column: Unpaid Invoices */}
               <div className="lg:col-span-7 flex flex-col gap-6 min-h-0 overflow-hidden">
                   <div className="flex-1 bg-white rounded-[40px] shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col overflow-hidden">
@@ -386,8 +447,84 @@ const CustomerLedgerPage = () => {
                       </div>
                   </div>
               </div>
-          </div>
-      </div>
+              </div>
+          ) : (
+              /* Loyalty Content */
+              <div className="flex-1 min-h-0 flex flex-col gap-8 overflow-hidden pb-4 animate-in slide-in-from-right-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
+                      <div className="bg-white p-8 rounded-[40px] shadow-lg shadow-indigo-100 border border-indigo-50 flex items-center gap-6">
+                          <div className="w-16 h-16 bg-indigo-600 text-white rounded-[24px] flex items-center justify-center shadow-xl shadow-indigo-200">
+                              <Star size={32} />
+                          </div>
+                          <div>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Available Points</p>
+                              <p className="text-4xl font-black text-indigo-600 tracking-tighter">{parseFloat(customer.loyalty_points || 0).toFixed(0)}</p>
+                          </div>
+                      </div>
+                      
+                      <div className="md:col-span-2 bg-indigo-50 p-8 rounded-[40px] flex items-center justify-between gap-6 border border-indigo-100">
+                          <div>
+                              <h4 className="font-black text-indigo-900 uppercase tracking-tight mb-1">Loyalty Status</h4>
+                              <p className="text-xs font-bold text-indigo-600/60 uppercase tracking-widest">
+                                  {customer.loyalty_enabled !== 0 ? 'MEMBERSHIP ACTIVE' : 'MEMBERSHIP DISABLED'}
+                              </p>
+                          </div>
+                          <AppButton 
+                              variant="primary" 
+                              className="px-8 py-4 rounded-[24px] bg-indigo-600 font-black uppercase tracking-widest text-[10px]"
+                              onClick={() => setShowAdjustLoyaltyModal(true)}
+                          >
+                              Manual Adjustment
+                          </AppButton>
+                      </div>
+                  </div>
+
+                  <div className="flex-1 bg-white rounded-[40px] shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col overflow-hidden">
+                      <div className="p-6 border-b border-slate-50 flex items-center justify-between shrink-0">
+                          <div className="flex items-center gap-3">
+                              <History className="text-indigo-600" size={20} />
+                              <h3 className="font-black text-slate-900 uppercase tracking-tight text-sm">Loyalty History</h3>
+                          </div>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                          {accountData.loyalty_history.length > 0 ? (
+                              <div className="space-y-4">
+                                  {accountData.loyalty_history.map(item => (
+                                      <div key={item.id} className="p-4 bg-slate-50 rounded-[28px] border border-slate-100 flex items-center justify-between group hover:border-indigo-200 transition-all">
+                                          <div className="flex items-center gap-4">
+                                              <div className={cn(
+                                                  "w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-lg",
+                                                  item.type === 'earn' ? "bg-emerald-500" : item.type === 'redeem' ? "bg-rose-500" : "bg-indigo-600"
+                                              )}>
+                                                  {item.type === 'earn' ? <ArrowDownLeft size={18} /> : item.type === 'redeem' ? <ArrowUpRight size={18} /> : <RefreshCcw size={18} />}
+                                              </div>
+                                              <div>
+                                                  <p className="text-xs font-black text-slate-900 uppercase">{item.description}</p>
+                                                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{new Date(item.created_at).toLocaleString()}</p>
+                                              </div>
+                                          </div>
+                                          <div className="text-right">
+                                              <p className={cn(
+                                                  "text-sm font-black",
+                                                  item.type === 'earn' ? "text-emerald-600" : item.type === 'redeem' ? "text-rose-600" : "text-indigo-600"
+                                              )}>
+                                                  {item.type === 'earn' || (item.type === 'adjust' && item.points > 0) ? '+' : ''}{item.points} Pts
+                                              </p>
+                                              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Balance: {item.balance_after} Pts</p>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                          ) : (
+                              <div className="py-20 text-center opacity-30 flex flex-col items-center">
+                                  <Star size={48} className="mb-4 text-indigo-300" />
+                                  <p className="font-black uppercase tracking-widest text-sm text-slate-400">No loyalty history found</p>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          )}
 
       {/* Payment Modal */}
       <AppModal
@@ -457,6 +594,63 @@ const CustomerLedgerPage = () => {
                 <div className="flex gap-4 pt-4">
                     <AppButton variant="secondary" className="flex-1 py-4 rounded-2xl font-black uppercase tracking-widest" type="button" onClick={() => setShowPaymentModal(false)}>Cancel</AppButton>
                     <AppButton variant="success" className="flex-[2] py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-emerald-900/20" loading={processing} type="submit">Record Payment</AppButton>
+                </div>
+            </form>
+        </div>
+      </AppModal>
+
+      {/* Adjust Loyalty Modal */}
+      <AppModal
+        isOpen={showAdjustLoyaltyModal}
+        onClose={() => setShowAdjustLoyaltyModal(false)}
+        title="Manual Points Adjustment"
+        description={`Adjust loyalty points for ${customer?.name}`}
+        size="md"
+      >
+        <div className="space-y-6 py-4">
+            <div className="p-6 bg-indigo-50 rounded-[32px] border-2 border-indigo-100 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-600 text-white rounded-2xl flex items-center justify-center">
+                        <Star size={20} />
+                    </div>
+                    <span className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Current Balance</span>
+                </div>
+                <span className="font-black text-2xl text-indigo-600 tracking-tighter">{parseFloat(customer?.loyalty_points || 0).toFixed(0)} Pts</span>
+            </div>
+
+            <form onSubmit={handleAdjustLoyalty} className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                    <FormInput 
+                        label="Points"
+                        type="number"
+                        required
+                        placeholder="Points amount"
+                        value={loyaltyAdjustData.points}
+                        onChange={e => setLoyaltyAdjustData({...loyaltyAdjustData, points: e.target.value})}
+                    />
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700 ml-1">Adjustment Type</label>
+                        <select 
+                            className="input-field"
+                            value={loyaltyAdjustData.type}
+                            onChange={e => setLoyaltyAdjustData({...loyaltyAdjustData, type: e.target.value})}
+                        >
+                            <option value="add">Add Points (+)</option>
+                            <option value="subtract">Subtract Points (-)</option>
+                        </select>
+                    </div>
+                </div>
+                <FormInput 
+                    label="Reason / Description"
+                    placeholder="e.g. Compensation for order delay"
+                    icon={FileText}
+                    value={loyaltyAdjustData.description}
+                    onChange={e => setLoyaltyAdjustData({...loyaltyAdjustData, description: e.target.value})}
+                />
+                
+                <div className="flex gap-4 pt-4">
+                    <AppButton variant="secondary" className="flex-1" type="button" onClick={() => setShowAdjustLoyaltyModal(false)}>Cancel</AppButton>
+                    <AppButton variant="primary" className="flex-[2]" loading={processing} type="submit">Apply Adjustment</AppButton>
                 </div>
             </form>
         </div>

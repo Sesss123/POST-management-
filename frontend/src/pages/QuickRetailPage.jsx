@@ -24,8 +24,9 @@ import {
   CreditCard,
   Printer
 } from 'lucide-react';
-import { quickRetailApi, shiftApi, userApi } from '../api/api';
+import { quickRetailApi, shiftApi, userApi, gatewayPaymentApi } from '../api/api';
 import { AppButton, useToast, AppModal, Skeleton } from '../components/ui';
+import PaymentQRModal from '../components/PaymentQRModal';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { cn } from '../utils/cn';
@@ -61,6 +62,8 @@ const QuickRetailPage = () => {
     // Age Confirmation Modal
     const [showAgeModal, setShowAgeModal] = useState(false);
     const [pendingItem, setPendingItem] = useState(null);
+    const [showQRModal, setShowQRModal] = useState(false);
+    const [qrTransactionData, setQrTransactionData] = useState(null);
 
     const fetchData = async () => {
         setLoading(true);
@@ -164,6 +167,18 @@ const QuickRetailPage = () => {
                 order_type: orderType,
                 cash_received: paymentMethod === 'cash' ? parseFloat(cashReceived) : total
             };
+
+            if (paymentMethod === 'qr') {
+                const res = await gatewayPaymentApi.createQR({
+                    ...payload,
+                    source: 'quick_retail',
+                    items: cart.map(i => ({ item_id: i.id, qty: i.qty }))
+                });
+                setQrTransactionData(res.data.data);
+                setShowQRModal(true);
+                setProcessing(false);
+                return;
+            }
 
             const { data } = await quickRetailApi.createQuickSale(payload);
             
@@ -313,8 +328,16 @@ const QuickRetailPage = () => {
                                     >
                                         <div className="flex-1">
                                             <h4 className="font-black text-slate-800 text-[11px] leading-tight line-clamp-2 uppercase mb-1">{item.name}</h4>
-                                            <div className="flex flex-wrap gap-1">
+                                            <div className="flex flex-wrap gap-1 items-center">
                                                 <span className="text-[7px] font-black text-slate-400 uppercase">{item.category}</span>
+                                                {!!item.track_stock && (
+                                                    <span className={cn(
+                                                        "text-[7px] font-black px-1 rounded uppercase",
+                                                        item.stock_qty <= 0 ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-600"
+                                                    )}>
+                                                        Stock: {item.stock_qty}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-50">
@@ -437,11 +460,21 @@ const QuickRetailPage = () => {
                                 onClick={() => setPaymentMethod('card')}
                                 className={cn(
                                     "flex-1 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all border-2",
-                                    paymentMethod === 'card' ? "bg-indigo-600 border-indigo-600 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
+                                    paymentMethod === 'card' ? "bg-slate-900 border-slate-900 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
                                 )}
                             >
                                 <CreditCard size={20} />
                                 <span className="font-black uppercase tracking-widest text-sm">Card</span>
+                            </button>
+                            <button 
+                                onClick={() => setPaymentMethod('qr')}
+                                className={cn(
+                                    "flex-1 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all border-2",
+                                    paymentMethod === 'qr' ? "bg-indigo-600 border-indigo-600 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
+                                )}
+                            >
+                                <Zap size={20} />
+                                <span className="font-black uppercase tracking-widest text-sm">QR Pay</span>
                             </button>
                         </div>
 
@@ -504,6 +537,22 @@ const QuickRetailPage = () => {
                         </div>
                     </div>
                 </div>
+
+                <PaymentQRModal 
+                    isOpen={showQRModal}
+                    onClose={() => setShowQRModal(false)}
+                    transactionData={qrTransactionData}
+                    onSuccess={(data) => {
+                        setShowQRModal(false);
+                        addToast('QR Payment Successful!', 'success');
+                        setCart([]);
+                        setCashReceived('');
+                        fetchData();
+                    }}
+                    onCancel={() => {
+                        setProcessing(false);
+                    }}
+                />
             </div>
 
             {/* Age Verification Modal */}

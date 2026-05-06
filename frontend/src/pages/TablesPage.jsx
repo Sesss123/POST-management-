@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { tableApi } from '../api/api';
-import { Grid3X3, Plus, Utensils, Edit } from 'lucide-react';
-import { AppButton, AppCard, AppTable, StatusBadge, AppModal, FormInput, useToast } from '../components/ui';
+import { Grid3X3, Plus, Utensils, QrCode } from 'lucide-react';
+import { AppButton, AppCard, StatusBadge, AppModal, FormInput, useToast } from '../components/ui';
+import TableQRCodeModal from '../components/tables/TableQRCodeModal';
 
 const TablesPage = () => {
   const toast = useToast();
@@ -9,6 +10,8 @@ const TablesPage = () => {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ table_no: '' });
+  
+  const [qrModal, setQrModal] = useState({ show: false, table: null });
 
   useEffect(() => {
     fetchTables();
@@ -62,9 +65,21 @@ const TablesPage = () => {
                       </div>
                       <h3 className="text-2xl font-black text-slate-900 mb-1">Table {table.table_no}</h3>
                       <StatusBadge status={table.status} className="mb-4" />
-                      <div className="w-full pt-4 border-t border-slate-50">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Status</p>
-                          <p className="text-sm font-bold text-slate-600 uppercase tracking-tighter">{table.status}</p>
+                      
+                      <div className="w-full pt-4 border-t border-slate-50 flex flex-col gap-3">
+                          <div className="flex justify-between items-center px-2">
+                             <div className="text-left">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Status</p>
+                                <p className="text-xs font-bold text-slate-600 uppercase tracking-tighter">{table.status}</p>
+                             </div>
+                             <button 
+                                onClick={() => setQrModal({ show: true, table: table })}
+                                className="p-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                title="Digital Menu QR"
+                             >
+                                <QrCode size={18} />
+                             </button>
+                          </div>
                       </div>
                   </div>
               </AppCard>
@@ -89,6 +104,14 @@ const TablesPage = () => {
             </div>
         </form>
       </AppModal>
+
+      {/* QR Modal */}
+      <TableQRCodeModal 
+        isOpen={qrModal.show}
+        onClose={() => setQrModal({ show: false, table: null })}
+        table={qrModal.table}
+        restaurantName="RestoLedger"
+      />
     </div>
   );
 };

@@ -1,0 +1,21 @@
+[
+  { "name": "Chicken Fried Rice", "category": "Main Dishes", "main_category": "Rice", "price": 750.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Egg Fried Rice", "category": "Main Dishes", "main_category": "Rice", "price": 650.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Vegetable Fried Rice", "category": "Main Dishes", "main_category": "Rice", "price": 550.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Chicken Kottu", "category": "Main Dishes", "main_category": "Kottu", "price": 800.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Egg Kottu", "category": "Main Dishes", "main_category": "Kottu", "price": 700.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Dolphin Kottu (Chicken)", "category": "Main Dishes", "main_category": "Kottu", "price": 950.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Cheese Kottu (Chicken)", "category": "Main Dishes", "main_category": "Kottu", "price": 1100.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Fish Patty", "category": "Short Eats", "main_category": "Snacks", "price": 60.00, "item_type": "food", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "Egg Bun", "category": "Short Eats", "main_category": "Snacks", "price": 80.00, "item_type": "food", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "Vegetable Roti", "category": "Short Eats", "main_category": "Snacks", "price": 70.00, "item_type": "food", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "Chicken Curry", "category": "Curries", "main_category": "Sides", "price": 450.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Dhal Curry", "category": "Curries", "main_category": "Sides", "price": 250.00, "item_type": "food", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Pol Sambol", "category": "Sides", "main_category": "Sides", "price": 150.00, "item_type": "food", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "Coca Cola 500ml", "category": "Beverages", "main_category": "Cold Drinks", "price": 250.00, "item_type": "beverage", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "Sprite 500ml", "category": "Beverages", "main_category": "Cold Drinks", "price": 250.00, "item_type": "beverage", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "EBM Water 500ml", "category": "Beverages", "main_category": "Water", "price": 100.00, "item_type": "beverage", "send_to_kitchen": 0, "show_on_public_menu": 1 },
+  { "name": "Fresh Lime Juice", "category": "Beverages", "main_category": "Fresh Juice", "price": 350.00, "item_type": "beverage", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Tea", "category": "Beverages", "main_category": "Hot Drinks", "price": 80.00, "item_type": "beverage", "send_to_kitchen": 1, "show_on_public_menu": 1 },
+  { "name": "Coffee", "category": "Beverages", "main_category": "Hot Drinks", "price": 120.00, "item_type": "beverage", "send_to_kitchen": 1, "show_on_public_menu": 1 }
+]

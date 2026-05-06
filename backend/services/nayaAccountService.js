@@ -1,3 +1,4 @@
+const loyaltyService = require('./loyaltyService');
 /**
  * Naya Account Service
  * Handles granular customer credit/debit operations, ledger logging, and payment allocation.
@@ -97,7 +98,7 @@ exports.allocatePaymentOldestFirst = async (connection, { customerId, paymentId,
     let remainingToAllocate = parseFloat(amount);
     
     const [unpaidInvoices] = await connection.query(
-        `SELECT id, balance_amount, paid_amount 
+        `SELECT id, uuid, invoice_no, balance_amount, paid_amount, grand_total, shop_id 
          FROM invoices 
          WHERE customer_id = ? AND payment_status IN ('unpaid', 'partial') 
          AND balance_amount > 0
@@ -126,6 +127,19 @@ exports.allocatePaymentOldestFirst = async (connection, { customerId, paymentId,
             'INSERT INTO payment_allocations (payment_id, invoice_id, allocated_amount) VALUES (?, ?, ?)',
             [paymentId, inv.id, amountToApply]
         );
+
+        // Loyalty Points Earning (Only if now fully paid)
+        if (newStatus === 'paid') {
+            // We earn points based on the grand_total of the invoice
+            await loyaltyService.addPoints(connection, {
+                customerId,
+                invoiceId: inv.id,
+                amount: inv.grand_total,
+                type: 'earn',
+                description: `Earned from settled credit invoice ${inv.invoice_no}`,
+                shopId: inv.shop_id
+            });
+        }
 
         remainingToAllocate -= amountToApply;
     }

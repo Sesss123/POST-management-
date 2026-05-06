@@ -9,8 +9,8 @@ exports.openShift = async (req, res) => {
     try {
         // Check if there is already an open shift for this user
         const [openShifts] = await db.query(
-            "SELECT id FROM shifts WHERE user_id = ? AND status = 'open'",
-            [req.user.id]
+            "SELECT id FROM shifts WHERE user_id = ? AND status = 'open' AND shop_id = ?",
+            [req.user.id, req.shopId]
         );
 
         if (openShifts.length > 0) {
@@ -18,8 +18,8 @@ exports.openShift = async (req, res) => {
         }
 
         const [result] = await db.query(
-            'INSERT INTO shifts (user_id, opening_cash, status) VALUES (?, ?, ?)',
-            [req.user.id, opening_cash || 0, 'open']
+            'INSERT INTO shifts (user_id, opening_cash, status, shop_id) VALUES (?, ?, ?, ?)',
+            [req.user.id, opening_cash || 0, 'open', req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -39,8 +39,8 @@ exports.getCurrentShift = async (req, res) => {
     const connection = await db.getConnection();
     try {
         const [shifts] = await connection.query(
-            "SELECT * FROM shifts WHERE user_id = ? AND status = 'open' LIMIT 1",
-            [req.user.id]
+            "SELECT * FROM shifts WHERE user_id = ? AND status = 'open' AND shop_id = ? LIMIT 1",
+            [req.user.id, req.shopId]
         );
 
         if (shifts.length === 0) {
@@ -50,27 +50,27 @@ exports.getCurrentShift = async (req, res) => {
         const shift = shifts[0];
 
         // Calculate expected cash
-        // expected = opening + cash_sales + credit_payments_cash + cash_in - cash_out
+        // expected = opening + cash_sales + credit_payments_cash + cash_in - cash_out - expenses
         
         // 1. Cash Sales (from invoice_payments)
         const [cashSales] = await connection.query(
             `SELECT SUM(ip.amount) as total 
              FROM invoice_payments ip 
              JOIN invoices i ON ip.invoice_id = i.id 
-             WHERE i.created_by = ? AND ip.payment_method = 'cash' AND ip.created_at >= ?`,
-            [req.user.id, shift.start_time]
+             WHERE i.created_by = ? AND ip.payment_method = 'cash' AND ip.created_at >= ? AND i.shop_id = ?`,
+            [req.user.id, shift.start_time, req.shopId]
         );
 
         // 2. Customer Credit Payments (from payments table)
         const [creditPayments] = await connection.query(
-            "SELECT SUM(amount) as total FROM payments WHERE created_by = ? AND payment_method = 'cash' AND created_at >= ?",
-            [req.user.id, shift.start_time]
+            "SELECT SUM(amount) as total FROM payments WHERE created_by = ? AND payment_method = 'cash' AND created_at >= ? AND shop_id = ?",
+            [req.user.id, shift.start_time, req.shopId]
         );
 
         // 3. Cash Movements (In/Out)
         const [movements] = await connection.query(
-            "SELECT type, SUM(amount) as total FROM cash_movements WHERE shift_id = ? GROUP BY type",
-            [shift.id]
+            "SELECT type, SUM(amount) as total FROM cash_movements WHERE shift_id = ? AND shop_id = ? GROUP BY type",
+            [shift.id, req.shopId]
         );
 
         let cashIn = 0;
@@ -80,11 +80,19 @@ exports.getCurrentShift = async (req, res) => {
             if (m.type === 'cash_out') cashOut = m.total;
         });
 
+        // 4. Expenses paid from drawer
+        const [drawerExpenses] = await connection.query(
+            "SELECT SUM(amount) as total FROM expenses WHERE shop_id = ? AND paid_from_cash_drawer = 1 AND status = 'active' AND created_at >= ? AND created_by = ?",
+            [req.shopId, shift.start_time, req.user.id]
+        );
+        const expenseTotal = parseFloat(drawerExpenses[0].total || 0);
+
         const expectedCash = parseFloat(shift.opening_cash) + 
                             parseFloat(cashSales[0].total || 0) + 
                             parseFloat(creditPayments[0].total || 0) + 
                             parseFloat(cashIn) - 
-                            parseFloat(cashOut);
+                            parseFloat(cashOut) -
+                            expenseTotal;
 
         res.json({ success: true, data: { ...shift, expected_cash: expectedCash } });
     } catch (error) {
@@ -106,8 +114,8 @@ exports.closeShift = async (req, res) => {
         await connection.beginTransaction();
 
         const [shifts] = await connection.query(
-            "SELECT * FROM shifts WHERE user_id = ? AND status = 'open' LIMIT 1",
-            [req.user.id]
+            "SELECT * FROM shifts WHERE user_id = ? AND status = 'open' AND shop_id = ? LIMIT 1",
+            [req.user.id, req.shopId]
         );
 
         if (shifts.length === 0) {
@@ -121,18 +129,18 @@ exports.closeShift = async (req, res) => {
             `SELECT SUM(ip.amount) as total 
              FROM invoice_payments ip 
              JOIN invoices i ON ip.invoice_id = i.id 
-             WHERE i.created_by = ? AND ip.payment_method = 'cash' AND ip.created_at >= ?`,
-            [req.user.id, shift.start_time]
+             WHERE i.created_by = ? AND ip.payment_method = 'cash' AND ip.created_at >= ? AND i.shop_id = ?`,
+            [req.user.id, shift.start_time, req.shopId]
         );
 
         const [creditPayments] = await connection.query(
-            "SELECT SUM(amount) as total FROM payments WHERE created_by = ? AND payment_method = 'cash' AND created_at >= ?",
-            [req.user.id, shift.start_time]
+            "SELECT SUM(amount) as total FROM payments WHERE created_by = ? AND payment_method = 'cash' AND created_at >= ? AND shop_id = ?",
+            [req.user.id, shift.start_time, req.shopId]
         );
 
         const [movements] = await connection.query(
-            "SELECT type, SUM(amount) as total FROM cash_movements WHERE shift_id = ? GROUP BY type",
-            [shift.id]
+            "SELECT type, SUM(amount) as total FROM cash_movements WHERE shift_id = ? AND shop_id = ? GROUP BY type",
+            [shift.id, req.shopId]
         );
 
         let cashIn = 0;
@@ -142,17 +150,25 @@ exports.closeShift = async (req, res) => {
             if (m.type === 'cash_out') cashOut = m.total;
         });
 
+        // 4. Expenses paid from drawer
+        const [drawerExpenses] = await connection.query(
+            "SELECT SUM(amount) as total FROM expenses WHERE shop_id = ? AND paid_from_cash_drawer = 1 AND status = 'active' AND created_at >= ? AND created_by = ?",
+            [req.shopId, shift.start_time, req.user.id]
+        );
+        const expenseTotal = parseFloat(drawerExpenses[0].total || 0);
+
         const expectedCash = parseFloat(shift.opening_cash) + 
                             parseFloat(cashSales[0].total || 0) + 
                             parseFloat(creditPayments[0].total || 0) + 
                             parseFloat(cashIn) - 
-                            parseFloat(cashOut);
+                            parseFloat(cashOut) -
+                            expenseTotal;
 
         const difference = parseFloat(actual_cash) - expectedCash;
 
         await connection.query(
-            "UPDATE shifts SET status = 'closed', end_time = CURRENT_TIMESTAMP, actual_cash = ?, expected_cash = ?, difference = ?, note = ? WHERE id = ?",
-            [actual_cash, expectedCash, difference, note, shift.id]
+            "UPDATE shifts SET status = 'closed', end_time = CURRENT_TIMESTAMP, actual_cash = ?, expected_cash = ?, difference = ?, note = ? WHERE id = ? AND shop_id = ?",
+            [actual_cash, expectedCash, difference, note, shift.id, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -181,8 +197,8 @@ exports.recordCashMovement = async (req, res) => {
 
     try {
         const [shifts] = await db.query(
-            "SELECT id FROM shifts WHERE user_id = ? AND status = 'open' LIMIT 1",
-            [req.user.id]
+            "SELECT id FROM shifts WHERE user_id = ? AND status = 'open' AND shop_id = ? LIMIT 1",
+            [req.user.id, req.shopId]
         );
 
         if (shifts.length === 0) {
@@ -190,8 +206,8 @@ exports.recordCashMovement = async (req, res) => {
         }
 
         await db.query(
-            'INSERT INTO cash_movements (shift_id, user_id, type, amount, reason) VALUES (?, ?, ?, ?, ?)',
-            [shifts[0].id, req.user.id, type, amount, reason]
+            'INSERT INTO cash_movements (shift_id, user_id, type, amount, reason, shop_id) VALUES (?, ?, ?, ?, ?, ?)',
+            [shifts[0].id, req.user.id, type, amount, reason, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -209,11 +225,11 @@ exports.recordCashMovement = async (req, res) => {
 // @access  Private
 exports.getShifts = async (req, res) => {
     try {
-        let query = "SELECT s.*, u.name as user_name FROM shifts s JOIN users u ON s.user_id = u.id ";
-        let params = [];
+        let query = "SELECT s.*, u.name as user_name FROM shifts s JOIN users u ON s.user_id = u.id WHERE s.shop_id = ? ";
+        let params = [req.shopId];
 
         if (req.user.role !== 'admin') {
-            query += " WHERE s.user_id = ? ";
+            query += " AND s.user_id = ? ";
             params.push(req.user.id);
         }
 

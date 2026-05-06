@@ -10,8 +10,8 @@ const generateSessionNo = () => {
 };
 
 // Helper to get system settings
-const getSystemSettings = async (connection) => {
-    const [rows] = await connection.query('SELECT * FROM settings');
+const getSystemSettings = async (connection, shopId) => {
+    const [rows] = await connection.query('SELECT * FROM settings WHERE shop_id = ?', [shopId]);
     return rows.reduce((acc, s) => {
         acc[s.setting_key] = s.setting_value;
         return acc;
@@ -29,7 +29,7 @@ exports.openSession = async (req, res) => {
         await connection.beginTransaction();
 
         // 1. Check if table is available
-        const [tables] = await connection.query('SELECT status FROM restaurant_tables WHERE id = ?', [table_id]);
+        const [tables] = await connection.query('SELECT status FROM restaurant_tables WHERE id = ? AND shop_id = ?', [table_id, req.shopId]);
         if (tables.length === 0) throw new Error('Table not found');
         if (tables[0].status !== 'available') throw new Error('Table is already occupied');
 
@@ -43,14 +43,14 @@ exports.openSession = async (req, res) => {
         }
 
         const [result] = await connection.query(
-            `INSERT INTO table_sessions (uuid, session_no, table_id, customer_id, opened_by, order_type, waiter_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [sessionUuid, session_no, table_id, customer_id || null, req.user.id, order_type, finalWaiterId]
+            `INSERT INTO table_sessions (uuid, session_no, table_id, customer_id, opened_by, order_type, waiter_id, shop_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [sessionUuid, session_no, table_id, customer_id || null, req.user.id, order_type, finalWaiterId, req.shopId]
         );
         const sessionId = result.insertId;
 
         // 3. Update table status
-        await connection.query('UPDATE restaurant_tables SET status = "occupied" WHERE id = ?', [table_id]);
+        await connection.query('UPDATE restaurant_tables SET status = "occupied" WHERE id = ? AND shop_id = ?', [table_id, req.shopId]);
 
         await logAction(req.user.id, 'session_opened', 'table_session', sessionId, null, { table_id, session_no });
 
@@ -80,8 +80,9 @@ exports.getOpenSessions = async (req, res) => {
              FROM table_sessions s
              LEFT JOIN restaurant_tables t ON s.table_id = t.id
              LEFT JOIN customers c ON s.customer_id = c.id
-             WHERE s.status = 'open'
-             ORDER BY s.opened_at DESC`
+             WHERE s.status = 'open' AND s.shop_id = ?
+             ORDER BY s.opened_at DESC`,
+            [req.shopId]
         );
         res.json({ success: true, data: sessions });
     } catch (error) {
@@ -102,7 +103,7 @@ exports.addItemsToSession = async (req, res) => {
         await connection.beginTransaction();
 
         const where = buildIdOrUuidWhere('s', sessionId);
-        const [sessions] = await connection.query(`SELECT id, status, waiter_id FROM table_sessions s WHERE ${where.query}`, [where.value]);
+        const [sessions] = await connection.query(`SELECT id, status, waiter_id FROM table_sessions s WHERE ${where.query} AND s.shop_id = ?`, [where.value, req.shopId]);
         if (sessions.length === 0) throw new Error('Session not found');
         const sessionInternalId = sessions[0].id;
         if (sessions[0].status !== 'open') throw new Error('Session is not open');
@@ -116,14 +117,14 @@ exports.addItemsToSession = async (req, res) => {
             let realPrice, realName, comboId = null, itemId = null;
             
             if (itemInput.is_combo) {
-                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ?', [itemInput.id || itemInput.item_id]);
+                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ? AND shop_id = ?', [itemInput.id || itemInput.item_id, req.shopId]);
                 if (comboData.length === 0) throw new Error(`Combo ID ${itemInput.id} not found`);
                 if (comboData[0].status !== 'active') throw new Error(`Combo ${comboData[0].name} is inactive`);
                 
                 // Check components
                 const [components] = await connection.query(
-                    'SELECT i.name, i.availability_status, i.status FROM combo_items ci JOIN items i ON ci.item_id = i.id WHERE ci.combo_id = ?',
-                    [itemInput.id || itemInput.item_id]
+                    'SELECT i.name, i.availability_status, i.status FROM combo_items ci JOIN items i ON ci.item_id = i.id WHERE ci.combo_id = ? AND ci.shop_id = ?',
+                    [itemInput.id || itemInput.item_id, req.shopId]
                 );
                 for (const comp of components) {
                     if (comp.status !== 'active') throw new Error(`Component ${comp.name} is inactive`);
@@ -134,7 +135,7 @@ exports.addItemsToSession = async (req, res) => {
                 realName = comboData[0].name;
                 comboId = itemInput.id || itemInput.item_id;
             } else {
-                const [itemData] = await connection.query('SELECT name, price, status, availability_status FROM items WHERE id = ?', [itemInput.item_id || itemInput.id]);
+                const [itemData] = await connection.query('SELECT name, price, status, availability_status FROM items WHERE id = ? AND shop_id = ?', [itemInput.item_id || itemInput.id, req.shopId]);
                 if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id || itemInput.id} not found`);
                 if (itemData[0].status !== 'active') throw new Error(`Item ${itemData[0].name} is inactive`);
                 if (itemData[0].availability_status !== 'available') {
@@ -152,8 +153,8 @@ exports.addItemsToSession = async (req, res) => {
             if (itemInput.modifiers && itemInput.modifiers.length > 0) {
                 const modifierIds = itemInput.modifiers.map(m => m.modifier_id || m.id);
                 const [dbModifiers] = await connection.query(
-                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active"',
-                    [modifierIds]
+                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active" AND shop_id = ?',
+                    [modifierIds, req.shopId]
                 );
 
                 for (const dbMod of dbModifiers) {
@@ -173,9 +174,9 @@ exports.addItemsToSession = async (req, res) => {
             const itemUuid = generateUuid();
 
             const [orderItemResult] = await connection.query(
-                `INSERT INTO order_items (uuid, session_id, item_id, combo_id, item_name, qty, unit_price, modifier_total, total, note, special_note, created_by, waiter_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [itemUuid, sessionInternalId, itemId, comboId, realName, itemInput.qty, realPrice, modifierTotal, total, itemInput.note || null, itemInput.special_note || null, req.user.id, itemWaiterId]
+                `INSERT INTO order_items (uuid, session_id, item_id, combo_id, item_name, qty, unit_price, modifier_total, total, note, special_note, created_by, waiter_id, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemUuid, sessionInternalId, itemId, comboId, realName, itemInput.qty, realPrice, modifierTotal, total, itemInput.note || null, itemInput.special_note || null, req.user.id, itemWaiterId, req.shopId]
             );
             const orderItemId = orderItemResult.insertId;
 
@@ -184,9 +185,9 @@ exports.addItemsToSession = async (req, res) => {
                 for (const mod of itemModifiers) {
                     const modUuid = generateUuid();
                     await connection.query(
-                        `INSERT INTO order_item_modifiers (uuid, order_item_id, modifier_id, modifier_name, modifier_type, price_delta)
-                         VALUES (?, ?, ?, ?, ?, ?)`,
-                        [modUuid, orderItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta]
+                        `INSERT INTO order_item_modifiers (uuid, order_item_id, modifier_id, modifier_name, modifier_type, price_delta, shop_id)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [modUuid, orderItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta, req.shopId]
                     );
                 }
             }
@@ -218,12 +219,12 @@ exports.voidSessionItem = async (req, res) => {
         const sessionWhere = buildIdOrUuidWhere('s', sessionId);
         const itemWhere = buildIdOrUuidWhere('oi', order_item_id);
 
-        const [items] = await connection.query(`SELECT oi.* FROM order_items oi JOIN table_sessions s ON oi.session_id = s.id WHERE ${itemWhere.query} AND ${sessionWhere.query}`, [...itemWhere.value, ...sessionWhere.value]);
+        const [items] = await connection.query(`SELECT oi.* FROM order_items oi JOIN table_sessions s ON oi.session_id = s.id WHERE ${itemWhere.query} AND ${sessionWhere.query} AND oi.shop_id = ? AND s.shop_id = ?`, [...itemWhere.value, ...sessionWhere.value, req.shopId, req.shopId]);
         if (items.length === 0) throw new Error('Item not found');
 
         const item = items[0];
 
-        const [settings] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = "cashier_void_limit"');
+        const [settings] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = "cashier_void_limit" AND shop_id = ?', [req.shopId]);
         const voidLimit = parseFloat(settings[0]?.setting_value || 2000);
 
         // Role-based validation
@@ -241,8 +242,8 @@ exports.voidSessionItem = async (req, res) => {
         }
 
         await connection.query(
-            `UPDATE order_items SET status = "voided", void_reason = ?, voided_by = ?, voided_at = CURRENT_TIMESTAMP WHERE id = ?`,
-            [reason, req.user.id, item.id]
+            `UPDATE order_items SET status = "voided", void_reason = ?, voided_by = ?, voided_at = CURRENT_TIMESTAMP WHERE id = ? AND shop_id = ?`,
+            [reason, req.user.id, item.id, req.shopId]
         );
 
         await logAction(req.user.id, 'order_item_voided', 'order_item', item.id, null, { reason, item_name: item.item_name });
@@ -267,15 +268,15 @@ exports.getSessionDetails = async (req, res) => {
              FROM table_sessions s
              LEFT JOIN restaurant_tables t ON s.table_id = t.id
              LEFT JOIN customers c ON s.customer_id = c.id
-             WHERE ${where.query}`,
-            [where.value]
+             WHERE ${where.query} AND s.shop_id = ?`,
+            [where.value, req.shopId]
         );
 
         if (sessions.length === 0) return res.status(404).json({ success: false, message: 'Session not found' });
 
         const [items] = await db.query(
-            'SELECT * FROM order_items WHERE session_id = ? AND status != "cancelled"',
-            [req.params.id]
+            'SELECT * FROM order_items WHERE session_id = ? AND status != "cancelled" AND shop_id = ?',
+            [req.params.id, req.shopId]
         );
 
         const session = sessions[0];
@@ -283,8 +284,8 @@ exports.getSessionDetails = async (req, res) => {
         // Fetch modifiers for each item
         for (let item of items) {
             const [itemMods] = await db.query(
-                'SELECT modifier_id as id, modifier_name as name, modifier_type as type, price_delta FROM order_item_modifiers WHERE order_item_id = ?',
-                [item.id]
+                'SELECT modifier_id as id, modifier_name as name, modifier_type as type, price_delta FROM order_item_modifiers WHERE order_item_id = ? AND shop_id = ?',
+                [item.id, req.shopId]
             );
             item.modifiers = itemMods;
         }
@@ -314,19 +315,19 @@ exports.payNowCheckout = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = await generateInvoiceNo(connection, 'INV');
         const invoiceUuid = generateUuid();
 
         const where = buildIdOrUuidWhere('s', sessionId);
-        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND shop_id = ?`, [where.value, req.shopId]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
         const sessionInternalId = session.id;
 
         const [orderItems] = await connection.query(
-            'SELECT * FROM order_items WHERE session_id = ? AND status IN ("active", "served")', 
-            [sessionInternalId]
+            'SELECT * FROM order_items WHERE session_id = ? AND status IN ("active", "served") AND shop_id = ?', 
+            [sessionInternalId, req.shopId]
         );
         if (orderItems.length === 0) throw new Error('No billable items in session');
 
@@ -361,14 +362,14 @@ exports.payNowCheckout = async (req, res) => {
                 uuid, invoice_no, customer_id, table_id, session_id, invoice_type, order_type, waiter_id,
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
-                grand_total, paid_amount, balance_amount, created_by
-            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                grand_total, paid_amount, balance_amount, created_by, shop_id
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
             [
                 invoiceUuid,
                 invoice_no, session.customer_id, session.table_id, sessionInternalId, session.order_type || 'dine_in', session.waiter_id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grandTotal, grandTotal, req.user.id
+                grandTotal, grandTotal, req.user.id, req.shopId
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -376,26 +377,26 @@ exports.payNowCheckout = async (req, res) => {
         for (const p of payments) {
             const payUuid = generateUuid();
             await connection.query(
-                `INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no)
-                 VALUES (?, ?, ?, ?, ?)`,
-                [payUuid, invoiceId, p.payment_method, p.amount, p.reference_no || null]
+                `INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [payUuid, invoiceId, p.payment_method, p.amount, p.reference_no || null, req.shopId]
             );
         }
 
         for (const item of orderItems) {
             await connection.query(
-                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, total)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total]
+                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, total, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, req.shopId]
             );
-            await connection.query('UPDATE order_items SET status = "billed" WHERE id = ?', [item.id]);
+            await connection.query('UPDATE order_items SET status = "billed" WHERE id = ? AND shop_id = ?', [item.id, req.shopId]);
         }
 
         await connection.query(
-            'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', 
-            [req.user.id, sessionInternalId]
+            'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?', 
+            [req.user.id, sessionInternalId, req.shopId]
         );
-        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
 
         await logAction(req.user.id, 'session_checkout_paid', 'invoice', invoiceId, null, { invoice_no, grandTotal });
 
@@ -436,10 +437,10 @@ exports.splitBill = async (req, res) => {
 
     try {
         await connection.beginTransaction();
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
 
         const where = buildIdOrUuidWhere('s', sessionId);
-        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND shop_id = ?`, [where.value, req.shopId]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
         const sessionInternalId = session.id;
@@ -450,15 +451,15 @@ exports.splitBill = async (req, res) => {
         if (split_type === 'by_items') {
             if (!order_item_ids || order_item_ids.length === 0) throw new Error('No items selected for split');
             const [items] = await connection.query(
-                `SELECT * FROM order_items WHERE id IN (?) AND session_id = ? AND status IN ("active", "served")`,
-                [order_item_ids, sessionInternalId]
+                `SELECT * FROM order_items WHERE id IN (?) AND session_id = ? AND status IN ("active", "served") AND shop_id = ?`,
+                [order_item_ids, sessionInternalId, req.shopId]
             );
             billableItems = items;
             subtotal = billableItems.reduce((acc, item) => acc + parseFloat(item.total), 0);
         } else if (split_type === 'equal') {
             const [allItems] = await connection.query(
-                'SELECT SUM(total) as total FROM order_items WHERE session_id = ? AND status IN ("active", "served")',
-                [sessionInternalId]
+                'SELECT SUM(total) as total FROM order_items WHERE session_id = ? AND status IN ("active", "served") AND shop_id = ?',
+                [sessionInternalId, req.shopId]
             );
             const totalToSplit = parseFloat(allItems[0].total || 0);
             subtotal = totalToSplit / (split_count || 1);
@@ -499,14 +500,14 @@ exports.splitBill = async (req, res) => {
                 uuid, invoice_no, customer_id, table_id, session_id, invoice_type, order_type, waiter_id,
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
-                grand_total, paid_amount, created_by
-            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                grand_total, paid_amount, created_by, shop_id
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'paid', 'split', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 invoiceUuid,
                 invoice_no, session.customer_id, session.table_id, sessionInternalId, session.order_type || 'dine_in', session.waiter_id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grandTotal, grandTotal, req.user.id
+                grandTotal, grandTotal, req.user.id, req.shopId
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -514,8 +515,8 @@ exports.splitBill = async (req, res) => {
         for (const p of payments) {
             const payUuid = generateUuid();
             await connection.query(
-                'INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no) VALUES (?, ?, ?, ?, ?)',
-                [payUuid, invoiceId, p.payment_method, p.amount, p.reference_no || null]
+                'INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no, shop_id) VALUES (?, ?, ?, ?, ?, ?)',
+                [payUuid, invoiceId, p.payment_method, p.amount, p.reference_no || null, req.shopId]
             );
         }
 
@@ -523,22 +524,22 @@ exports.splitBill = async (req, res) => {
             for (const item of billableItems) {
                 const itemUuid = generateUuid();
                 await connection.query(
-                    'INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total]
+                    'INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, req.shopId]
                 );
-                await connection.query('UPDATE order_items SET status = "billed" WHERE id = ?', [item.id]);
+                await connection.query('UPDATE order_items SET status = "billed" WHERE id = ? AND shop_id = ?', [item.id, req.shopId]);
             }
         } else {
             const itemUuid = generateUuid();
             await connection.query(
-                'INSERT INTO invoice_items (uuid, invoice_id, item_name, qty, unit_price, total) VALUES (?, ?, ?, ?, ?, ?)',
-                [itemUuid, invoiceId, `Split Payment (${split_type})`, 1, subtotal, subtotal]
+                'INSERT INTO invoice_items (uuid, invoice_id, item_name, qty, unit_price, total, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [itemUuid, invoiceId, `Split Payment (${split_type})`, 1, subtotal, subtotal, req.shopId]
             );
         }
 
         const [remainingItems] = await connection.query(
-            'SELECT COUNT(*) as count FROM order_items WHERE session_id = ? AND status IN ("active", "served")',
-            [sessionInternalId]
+            'SELECT COUNT(*) as count FROM order_items WHERE session_id = ? AND status IN ("active", "served") AND shop_id = ?',
+            [sessionInternalId, req.shopId]
         );
 
         let shouldClose = false;
@@ -546,28 +547,28 @@ exports.splitBill = async (req, res) => {
             if (remainingItems[0].count === 0) shouldClose = true;
         } else {
             const [sessionTotals] = await connection.query(
-                'SELECT SUM(total) as total FROM order_items WHERE session_id = ? AND status IN ("active", "served", "billed")',
-                [sessionInternalId]
+                'SELECT SUM(total) as total FROM order_items WHERE session_id = ? AND status IN ("active", "served", "billed") AND shop_id = ?',
+                [sessionInternalId, req.shopId]
             );
             const [billedTotals] = await connection.query(
-                'SELECT SUM(subtotal) as total FROM invoices WHERE session_id = ? AND payment_status != "cancelled"',
-                [sessionInternalId]
+                'SELECT SUM(subtotal) as total FROM invoices WHERE session_id = ? AND payment_status != "cancelled" AND shop_id = ?',
+                [sessionInternalId, req.shopId]
             );
             const totalNeeded = parseFloat(sessionTotals[0].total || 0);
             const totalBilled = parseFloat(billedTotals[0].total || 0);
             
             if (totalBilled >= totalNeeded - 0.01) {
                 shouldClose = true;
-                await connection.query('UPDATE order_items SET status = "billed" WHERE session_id = ? AND status IN ("active", "served")', [sessionInternalId]);
+                await connection.query('UPDATE order_items SET status = "billed" WHERE session_id = ? AND status IN ("active", "served") AND shop_id = ?', [sessionInternalId, req.shopId]);
             }
         }
 
         if (shouldClose) {
             await connection.query(
-                'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?',
-                [req.user.id, sessionInternalId]
+                'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?',
+                [req.user.id, sessionInternalId, req.shopId]
             );
-            await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
+            await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
         }
 
         await logAction(req.user.id, 'bill_split', 'invoice', invoiceId, null, { split_type, grandTotal });
@@ -599,12 +600,12 @@ exports.addToCreditCheckout = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = await generateInvoiceNo(connection, 'INV');
         const invoiceUuid = generateUuid();
 
         const where = buildIdOrUuidWhere('s', sessionId);
-        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND shop_id = ?`, [where.value, req.shopId]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
         const sessionInternalId = session.id;
@@ -613,8 +614,8 @@ exports.addToCreditCheckout = async (req, res) => {
         if (!finalCustomerId) throw new Error('Customer required for credit checkout');
 
         const [orderItems] = await connection.query(
-            'SELECT * FROM order_items WHERE session_id = ? AND status IN ("active", "served")', 
-            [sessionInternalId]
+            'SELECT * FROM order_items WHERE session_id = ? AND status IN ("active", "served") AND shop_id = ?', 
+            [sessionInternalId, req.shopId]
         );
         if (orderItems.length === 0) throw new Error('No billable items in session');
 
@@ -647,7 +648,8 @@ exports.addToCreditCheckout = async (req, res) => {
         // Validate credit limit before proceeding
         await nayaService.validateCreditLimit(connection, {
             customerId: finalCustomerId,
-            amount: grandTotal
+            amount: grandTotal,
+            shopId: req.shopId
         });
 
         const [invoiceResult] = await connection.query(
@@ -655,14 +657,14 @@ exports.addToCreditCheckout = async (req, res) => {
                 uuid, invoice_no, customer_id, table_id, session_id, invoice_type, order_type, waiter_id,
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
-                grand_total, paid_amount, balance_amount, created_by
-            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'unpaid', 'credit', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                grand_total, paid_amount, balance_amount, created_by, shop_id
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, 'unpaid', 'credit', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
             [
                 invoiceUuid,
                 invoice_no, finalCustomerId, session.table_id, sessionInternalId, session.order_type || 'dine_in', session.waiter_id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grandTotal, grandTotal, req.user.id
+                grandTotal, grandTotal, req.user.id, req.shopId
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -671,23 +673,24 @@ exports.addToCreditCheckout = async (req, res) => {
             customerId: finalCustomerId,
             invoiceId: invoiceId,
             amount: grandTotal,
-            description: `Table bill added to Naya Book - Inv: ${invoice_no}`
+            description: `Table bill added to Naya Book - Inv: ${invoice_no}`,
+            shopId: req.shopId
         });
 
         for (const item of orderItems) {
             await connection.query(
-                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, total)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total]
+                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, total, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, req.shopId]
             );
-            await connection.query('UPDATE order_items SET status = "billed" WHERE id = ?', [item.id]);
+            await connection.query('UPDATE order_items SET status = "billed" WHERE id = ? AND shop_id = ?', [item.id, req.shopId]);
         }
 
         await connection.query(
-            'UPDATE table_sessions SET status = "credit", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', 
-            [req.user.id, sessionInternalId]
+            'UPDATE table_sessions SET status = "credit", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?', 
+            [req.user.id, sessionInternalId, req.shopId]
         );
-        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
 
         await logAction(req.user.id, 'session_checkout_credit', 'invoice', invoiceId, null, { invoice_no, grandTotal, customer_id: finalCustomerId });
 
@@ -710,8 +713,8 @@ exports.addToCreditCheckout = async (req, res) => {
 exports.getActiveSessionByTable = async (req, res) => {
     try {
         const [sessions] = await db.query(
-            'SELECT * FROM table_sessions WHERE table_id = ? AND status = "open" LIMIT 1',
-            [req.params.tableId]
+            'SELECT * FROM table_sessions WHERE table_id = ? AND status = "open" AND shop_id = ? LIMIT 1',
+            [req.params.tableId, req.shopId]
         );
 
         if (sessions.length === 0) return res.json({ success: true, data: null });
@@ -733,15 +736,15 @@ exports.updateSessionItem = async (req, res) => {
         const sessionWhere = buildIdOrUuidWhere('s', sessionId);
         const itemWhere = buildIdOrUuidWhere('oi', itemId);
 
-        const [items] = await connection.query(`SELECT oi.unit_price FROM order_items oi JOIN table_sessions s ON oi.session_id = s.id WHERE ${itemWhere.query} AND ${sessionWhere.query}`, [...itemWhere.value, ...sessionWhere.value]);
+        const [items] = await connection.query(`SELECT oi.unit_price FROM order_items oi JOIN table_sessions s ON oi.session_id = s.id WHERE ${itemWhere.query} AND ${sessionWhere.query} AND oi.shop_id = ? AND s.shop_id = ?`, [...itemWhere.value, ...sessionWhere.value, req.shopId, req.shopId]);
         if (items.length === 0) throw new Error('Item not found in session');
 
         const unitPrice = items[0].unit_price;
         const total = unitPrice * qty;
 
         await connection.query(
-            `UPDATE order_items SET qty = ?, total = ?, note = ? WHERE ${itemWhere.query}`,
-            [qty, total, note, ...itemWhere.value]
+            `UPDATE order_items SET qty = ?, total = ?, note = ? WHERE ${itemWhere.query} AND shop_id = ?`,
+            [qty, total, note, ...itemWhere.value, req.shopId]
         );
 
         await connection.commit();
@@ -767,23 +770,21 @@ exports.transferTable = async (req, res) => {
         await connection.beginTransaction();
 
         const where = buildIdOrUuidWhere('s', sessionId);
-        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
-        if (sessions.length === 0) throw new Error('Active session not found');
-        const session = sourceSession = sessions[0];
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND shop_id = ?`, [where.value, req.shopId]);
         const sessionInternalId = session.id;
         
         if (session.table_id == target_table_id) throw new Error('Target table is the same as source table');
 
-        const [tables] = await connection.query('SELECT status FROM restaurant_tables WHERE id = ?', [target_table_id]);
+        const [tables] = await connection.query('SELECT status FROM restaurant_tables WHERE id = ? AND shop_id = ?', [target_table_id, req.shopId]);
         if (tables.length === 0) throw new Error('Target table not found');
         if (tables[0].status !== 'available') throw new Error('Target table is not available');
 
         // Update session
-        await connection.query('UPDATE table_sessions SET table_id = ? WHERE id = ?', [target_table_id, sessionInternalId]);
+        await connection.query('UPDATE table_sessions SET table_id = ? WHERE id = ? AND shop_id = ?', [target_table_id, sessionInternalId, req.shopId]);
         
         // Update table statuses
-        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
-        await connection.query('UPDATE restaurant_tables SET status = "occupied" WHERE id = ?', [target_table_id]);
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
+        await connection.query('UPDATE restaurant_tables SET status = "occupied" WHERE id = ? AND shop_id = ?', [target_table_id, req.shopId]);
 
         await logAction(req.user.id, 'table_transferred', 'table_session', sessionInternalId, null, { from_table: session.table_id, to_table: target_table_id });
 
@@ -840,6 +841,50 @@ exports.mergeTable = async (req, res) => {
         await connection.rollback();
         console.error(error);
         res.status(500).json({ success: false, message: error.message || 'Merge failed' });
+    } finally {
+        connection.release();
+    }
+};
+
+// @desc    Cancel table session (Free table)
+// @route   DELETE /api/table-sessions/:id
+// @access  Private
+exports.cancelSession = async (req, res) => {
+    const sessionId = req.params.id;
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const where = buildIdOrUuidWhere('s', sessionId);
+        const [sessions] = await connection.query(`SELECT id, table_id, status FROM table_sessions s WHERE ${where.query} AND s.shop_id = ?`, [where.value, req.shopId]);
+        if (sessions.length === 0) throw new Error('Session not found');
+        const session = sessions[0];
+        
+        if (session.status !== 'open') throw new Error('Only open sessions can be cancelled');
+
+        // Check for billed items
+        const [billedItems] = await connection.query('SELECT id FROM order_items WHERE session_id = ? AND status = "billed" AND shop_id = ?', [session.id, req.shopId]);
+        if (billedItems.length > 0) throw new Error('Cannot cancel session with billed items. Process payment instead.');
+
+        // 1. Close session
+        await connection.query('UPDATE table_sessions SET status = "cancelled", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', [req.user.id, session.id]);
+
+        // 2. Free table
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
+
+        // 3. Cancel active items
+        await connection.query('UPDATE order_items SET status = "cancelled" WHERE session_id = ? AND status = "active" AND shop_id = ?', [session.id, req.shopId]);
+
+        await logAction(req.user.id, 'session_cancelled', 'table_session', session.id, null, { table_id: session.table_id });
+
+        await connection.commit();
+        res.json({ success: true, message: 'Table session cancelled and table freed' });
+
+    } catch (error) {
+        await connection.rollback();
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     } finally {
         connection.release();
     }

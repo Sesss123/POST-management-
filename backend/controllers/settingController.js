@@ -1,12 +1,19 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
+const cache = require('../utils/cache');
 
 // @desc    Get all settings
 // @route   GET /api/settings
 // @access  Private
 exports.getSettings = async (req, res) => {
     try {
-        const [settings] = await db.query('SELECT * FROM settings ORDER BY group_name, setting_key');
+        const cacheKey = `settings:${req.shopId}`;
+        const cachedData = cache.get(cacheKey);
+        if (cachedData) {
+            return res.json(cachedData);
+        }
+
+        const [settings] = await db.query('SELECT * FROM settings WHERE shop_id = ? ORDER BY group_name, setting_key', [req.shopId]);
         
         // Group settings by group_name for easier consumption in frontend
         const groupedSettings = settings.reduce((acc, s) => {
@@ -31,11 +38,16 @@ exports.getSettings = async (req, res) => {
             return acc;
         }, {});
 
-        res.json({ 
+        const responseData = { 
             success: true, 
             data: groupedSettings,
             flat: flatSettings 
-        });
+        };
+
+        // Cache for 60 seconds
+        cache.set(cacheKey, responseData, 60);
+
+        res.json(responseData);
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -47,7 +59,7 @@ exports.getSettings = async (req, res) => {
 // @access  Private
 exports.getSettingsByGroup = async (req, res) => {
     try {
-        const [settings] = await db.query('SELECT * FROM settings WHERE group_name = ?', [req.params.groupName]);
+        const [settings] = await db.query('SELECT * FROM settings WHERE group_name = ? AND shop_id = ?', [req.params.groupName, req.shopId]);
         res.json({ success: true, data: settings });
     } catch (error) {
         console.error(error);
@@ -67,13 +79,13 @@ exports.updateSettings = async (req, res) => {
 
         for (const [key, value] of Object.entries(settings)) {
             // Get old value for audit log
-            const [oldVal] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = ?', [key]);
+            const [oldVal] = await connection.query('SELECT setting_value FROM settings WHERE setting_key = ? AND shop_id = ?', [key, req.shopId]);
             
             if (oldVal.length > 0) {
                 const newValue = String(value);
                 await connection.query(
-                    'UPDATE settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?',
-                    [newValue, req.user.id, key]
+                    'UPDATE settings SET setting_value = ?, updated_by = ? WHERE setting_key = ? AND shop_id = ?',
+                    [newValue, req.user.id, key, req.shopId]
                 );
 
                 if (oldVal[0].setting_value !== newValue) {
@@ -90,6 +102,10 @@ exports.updateSettings = async (req, res) => {
         }
 
         await connection.commit();
+        
+        // Invalidate cache
+        cache.del(`settings:${req.shopId}`);
+
         res.json({ success: true, message: 'Settings updated successfully' });
     } catch (error) {
         await connection.rollback();
@@ -108,15 +124,15 @@ exports.updateSettingByKey = async (req, res) => {
     const { value } = req.body;
 
     try {
-        const [oldVal] = await db.query('SELECT setting_value FROM settings WHERE setting_key = ?', [key]);
+        const [oldVal] = await db.query('SELECT setting_value FROM settings WHERE setting_key = ? AND shop_id = ?', [key, req.shopId]);
         if (oldVal.length === 0) {
             return res.status(404).json({ success: false, message: 'Setting not found' });
         }
 
         const newValue = String(value);
         await db.query(
-            'UPDATE settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?',
-            [newValue, req.user.id, key]
+            'UPDATE settings SET setting_value = ?, updated_by = ? WHERE setting_key = ? AND shop_id = ?',
+            [newValue, req.user.id, key, req.shopId]
         );
 
         if (oldVal[0].setting_value !== newValue) {
@@ -129,6 +145,9 @@ exports.updateSettingByKey = async (req, res) => {
                 { [key]: newValue }
             );
         }
+
+        // Invalidate cache
+        cache.del(`settings:${req.shopId}`);
 
         res.json({ success: true, message: 'Setting updated successfully' });
     } catch (error) {

@@ -32,13 +32,19 @@ import {
   List,
   Star,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Zap,
+  CircleDollarSign,
+  History,
+  X
 } from 'lucide-react';
 import { AppButton, AppCard, AppModal, StatCard, useToast, FormInput, FormSelect } from '../components/ui';
 import InvoicePrintModal from '../components/invoice/InvoicePrintModal';
 import KOTPrintModal from '../components/invoice/KOTPrintModal';
 import AddToCustomerAccountModal from '../components/naya/AddToCustomerAccountModal';
 import ItemModifierModal from '../components/pos/ItemModifierModal';
+import PaymentQRModal from '../components/PaymentQRModal';
+import { gatewayPaymentApi } from '../api/api';
 import { cn } from '../utils/cn';
 
 const TableBillingPage = () => {
@@ -115,6 +121,9 @@ const TableBillingPage = () => {
   const [showModifierModal, setShowModifierModal] = useState(false);
   const [modifierTarget, setModifierTarget] = useState(null);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrTransactionData, setQrTransactionData] = useState(null);
+  const [loyaltyPointsRedeem, setLoyaltyPointsRedeem] = useState(0);
 
   const toNumber = (val) => parseFloat(val) || 0;
 
@@ -205,6 +214,7 @@ const TableBillingPage = () => {
     setScEnabled(true);
     setTaxEnabled(false);
     setSelectedCustomer(null);
+    setLoyaltyPointsRedeem(0);
   };
 
   const handleSelectTable = async (table) => {
@@ -254,6 +264,59 @@ const TableBillingPage = () => {
       } catch (err) {
           toast.error(err.response?.data?.message || 'Failed to open session');
       }
+  };
+
+  const handleCancelSession = async () => {
+    if (!activeSession) return;
+    if (sessionItems.length > 0 || cart.length > 0) {
+        if (!window.confirm('This session has items. Are you sure you want to cancel and free this table?')) return;
+    } else {
+        if (!window.confirm('Free this table?')) return;
+    }
+
+    try {
+        setProcessing(true);
+        const { data } = await sessionApi.cancel(activeSession.uuid || activeSession.id);
+        if (data.success) {
+            toast.success('Table freed');
+            setActiveSession(null);
+            setSessionItems([]);
+            setCart([]);
+            fetchData();
+        }
+    } catch (err) {
+        toast.error(err.response?.data?.message || 'Failed to cancel session');
+    } finally {
+        setProcessing(false);
+    }
+  };
+
+  const handleQuickCash = async () => {
+    if (!activeSession || currentTotals.subtotal === 0) return;
+    
+    if (!window.confirm(`Process QUICK CASH payment for Rs. ${currentTotals.grandTotal.toLocaleString()}?`)) return;
+
+    try {
+        setProcessing(true);
+        const payload = {
+            payment_method: 'cash',
+            cash_received: currentTotals.grandTotal,
+            discount_type: 'fixed',
+            discount_value: 0
+        };
+        const { data } = await sessionApi.payNow(activeSession.uuid || activeSession.id, payload);
+        if (data.success) {
+            toast.success('Payment completed successfully!');
+            setActiveSession(null);
+            setSessionItems([]);
+            setCart([]);
+            fetchData();
+        }
+    } catch (err) {
+        toast.error(err.response?.data?.message || 'Quick checkout failed');
+    } finally {
+        setProcessing(false);
+    }
   };
 
   const addToCart = (item) => {
@@ -406,11 +469,14 @@ const TableBillingPage = () => {
             promotion_id: selectedPromo?.id || null,
             service_charge_enabled: scEnabled,
             tax_enabled: taxEnabled,
-            payments: payments
+            payments: payments,
+            customer_id: selectedCustomer?.id || null,
+            loyalty_points_redeem: loyaltyPointsRedeem || 0
         };
         const res = await sessionApi.payNow(activeSession.uuid || activeSession.id, payload);
         setLastInvoice(res.data.data);
         resetSale();
+        fetchData();
         setShowCheckoutModal(false);
         setShowPrintModal(true);
         toast.success('Payment completed successfully');
@@ -437,17 +503,56 @@ const TableBillingPage = () => {
             discount_value: discountValue,
             promotion_id: selectedPromo?.id || null,
             service_charge_enabled: scEnabled,
-            tax_enabled: taxEnabled
+            tax_enabled: taxEnabled,
+            loyalty_points_redeem: loyaltyPointsRedeem || 0
         };
         const res = await sessionApi.addToCredit(activeSession.uuid || activeSession.id, payload);
         setLastInvoice(res.data.data);
         resetSale();
+        fetchData();
         setShowAccountModal(false);
         setShowCheckoutModal(false);
         setShowPrintModal(true);
         toast.success('Credit sale recorded in customer account');
     } catch (err) {
         toast.error(err.response?.data?.message || 'Credit checkout failed');
+    } finally {
+        setProcessing(false);
+    }
+  };
+
+  const handleQRCheckout = async () => {
+    if (settings.shift_enforcement_enabled === 'true' && !currentShift) {
+        return toast.error('SHIFT ENFORCEMENT: Please open a shift before billing.');
+    }
+    
+    setProcessing(true);
+    try {
+        const payload = {
+            session_id: activeSession.uuid || activeSession.id,
+            items: [...sessionItems, ...cart].map(i => ({ 
+                item_id: i.item_id || i.id, 
+                qty: i.qty,
+                price: i.unit_price || i.price,
+                is_combo: i.is_combo || false
+            })),
+            discount_type: discountType,
+            discount_value: discountValue,
+            promotion_id: selectedPromo?.id || null,
+            order_type: selectedTable?.order_type || 'dine_in',
+            customer_id: selectedCustomer?.id || null,
+            loyalty_points_redeem: loyaltyPointsRedeem || 0,
+            source: 'table_billing'
+        };
+
+        const res = await gatewayPaymentApi.createQR(payload);
+        setQrTransactionData(res.data.data);
+        setShowQRModal(true);
+        // We don't close the checkout modal yet, or maybe we should?
+        // Let's close it so the QR modal is the main focus.
+        setShowCheckoutModal(false);
+    } catch (err) {
+        toast.error(err.response?.data?.message || 'QR creation failed');
     } finally {
         setProcessing(false);
     }
@@ -476,11 +581,19 @@ const TableBillingPage = () => {
     }
 
     const finalSubtotal = Math.max(0, discountedSubtotal - promoDiscount);
-    const tax = taxEnabled ? (finalSubtotal * parseFloat(settings.tax_percentage || 0)) / 100 : 0;
-    const sc = scEnabled ? (finalSubtotal * parseFloat(settings.service_charge_percentage || 10)) / 100 : 0;
-    const grandTotal = finalSubtotal + tax + sc;
 
-    return { subtotal, discountAmount, promoDiscount, tax, sc, grandTotal };
+    // Loyalty Discount
+    const loyaltyRedeemPoints = parseFloat(settings.loyalty_redeem_points || 100);
+    const loyaltyRedeemAmount = parseFloat(settings.loyalty_redeem_amount || 100);
+    const loyaltyDiscountAmount = (parseFloat(loyaltyPointsRedeem) / loyaltyRedeemPoints) * loyaltyRedeemAmount;
+    
+    const taxableSubtotal = Math.max(0, finalSubtotal - loyaltyDiscountAmount);
+    
+    const tax = taxEnabled ? (taxableSubtotal * parseFloat(settings.tax_percentage || 0)) / 100 : 0;
+    const sc = scEnabled ? (taxableSubtotal * parseFloat(settings.service_charge_percentage || 10)) / 100 : 0;
+    const grandTotal = taxableSubtotal + tax + sc;
+
+    return { subtotal, discountAmount, promoDiscount, loyaltyDiscountAmount, tax, sc, grandTotal };
   };
 
   const allBillItems = [...sessionItems, ...cart];
@@ -537,6 +650,7 @@ const TableBillingPage = () => {
             setLastInvoice(res.data.data.invoice);
             setShowPrintModal(true);
             resetSale();
+            fetchData();
         } else {
             refreshSession(selectedTable.id);
         }
@@ -603,14 +717,15 @@ const TableBillingPage = () => {
                 </div>
                 <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Restaurant Tables</h3>
             </div>
-            <div className="flex gap-4">
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available</span>
+            <div className="flex bg-slate-100/50 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-lg shadow-emerald-200 animate-pulse"></div>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Available</span>
                 </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Occupied</span>
+                <div className="w-px h-4 bg-slate-200 self-center mx-1"></div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-lg shadow-amber-200"></div>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Occupied</span>
                 </div>
             </div>
         </div>
@@ -625,15 +740,21 @@ const TableBillingPage = () => {
                         selectedTable?.id === table.id 
                             ? "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-900/30" 
                             : table.status === 'available' 
-                                ? "bg-white border-slate-100 text-slate-600 hover:border-emerald-500" 
+                                ? "bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-500" 
                                 : "bg-amber-50 border-amber-200 text-amber-700 shadow-sm"
                     )}
                 >
-                    <Utensils size={selectedTable?.id === table.id ? 24 : 20} className={cn("mb-2 sm:mb-3 transition-transform group-hover:scale-110", selectedTable?.id === table.id ? "text-white" : "text-slate-300")} />
+                    <Utensils 
+                        size={selectedTable?.id === table.id ? 24 : 20} 
+                        className={cn(
+                            "mb-2 sm:mb-3 transition-transform group-hover:scale-110", 
+                            selectedTable?.id === table.id ? "text-white" : table.status === 'available' ? "text-emerald-400" : "text-amber-400"
+                        )} 
+                    />
                     <span className="font-black text-sm sm:text-lg">{table.table_no}</span>
                     <span className={cn(
                         "text-[7px] sm:text-[8px] font-black uppercase tracking-widest mt-1",
-                        selectedTable?.id === table.id ? "text-indigo-200" : "text-slate-400"
+                        selectedTable?.id === table.id ? "text-indigo-200" : table.status === 'available' ? "text-emerald-500" : "text-amber-600"
                     )}>{table.status}</span>
                 </button>
             ))}
@@ -776,8 +897,8 @@ const TableBillingPage = () => {
                                     {viewMode === 'grid' ? (
                                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                                             {filteredItems.map(item => {
-                                                const isAvailable = item.availability_status === 'available' || item.is_combo;
-                                                const isSoldOut = item.availability_status === 'sold_out' && !item.is_combo;
+                                                const isAvailable = (item.availability_status === 'available' || item.is_combo) && (!item.track_stock || item.stock_qty > 0);
+                                                const isSoldOut = (item.availability_status === 'sold_out' || (item.track_stock && item.stock_qty <= 0)) && !item.is_combo;
                                                 return (
                                                     <button
                                                         key={`${item.is_combo ? 'c' : 'i'}-${item.id}`}
@@ -788,7 +909,7 @@ const TableBillingPage = () => {
                                                             isAvailable ? "bg-white border-slate-100 hover:border-indigo-600 hover:shadow-md active:scale-95" : "bg-slate-50 opacity-60 grayscale cursor-not-allowed"
                                                         )}
                                                     >
-                                                        {item.is_popular && !isSoldOut && <Star size={10} className="absolute top-2 right-2 text-amber-500 fill-amber-500" />}
+                                                        {!!item.is_popular && !isSoldOut && <Star size={10} className="absolute top-2 right-2 text-amber-500 fill-amber-500" />}
                                                         {isSoldOut && <div className="absolute inset-0 bg-white/60 flex items-center justify-center z-10"><span className="bg-rose-600 text-white px-2 py-0.5 rounded-full text-[8px] font-black uppercase rotate-[-5deg]">Sold Out</span></div>}
                                                         
                                                         <div className="flex-1">
@@ -796,10 +917,18 @@ const TableBillingPage = () => {
                                                             <div className="flex flex-wrap gap-1">
                                                                 <span className="text-[7px] font-black text-slate-400 uppercase">{item.category}</span>
                                                                 {item.portion_type && item.portion_type !== 'regular' && <span className="text-[7px] font-black text-indigo-500 uppercase bg-indigo-50 px-1 rounded">{item.portion_type}</span>}
+                                                                {!!item.track_stock && (
+                                                                    <span className={cn(
+                                                                        "text-[7px] font-black px-1 rounded uppercase",
+                                                                        item.stock_qty <= 0 ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-600"
+                                                                    )}>
+                                                                        Stock: {item.stock_qty}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center justify-between mt-auto pt-2 border-t border-slate-50">
-                                                            <p className="text-xs font-black text-indigo-600">Rs. {parseFloat(item.price).toLocaleString()}</p>
+                                                            <p className="text-xs font-black text-indigo-600">Rs. {parseFloat(item?.price || 0).toLocaleString()}</p>
                                                             <Plus size={14} className="text-slate-300" />
                                                         </div>
                                                     </button>
@@ -815,7 +944,7 @@ const TableBillingPage = () => {
                                                         <h4 className="font-black text-slate-800 text-xs uppercase">{item.name}</h4>
                                                         <p className="text-[8px] font-black text-slate-400 uppercase">{item.category} • {item.portion_type}</p>
                                                     </div>
-                                                    <p className="text-sm font-black text-indigo-600">Rs. {parseFloat(item.price).toLocaleString()}</p>
+                                                    <p className="text-sm font-black text-indigo-600">Rs. {parseFloat(item?.price || 0).toLocaleString()}</p>
                                                     <Plus size={16} className="text-slate-300 group-hover:text-indigo-600" />
                                                 </button>
                                             ))}
@@ -1000,29 +1129,51 @@ const TableBillingPage = () => {
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                        <button 
-                            className={cn(
-                                "flex items-center justify-center gap-2 py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all",
-                                cart.length === 0 ? "bg-slate-200 text-slate-400 cursor-not-allowed" : "bg-amber-100 text-amber-700 hover:bg-amber-600 hover:text-white"
-                            )}
+                        <AppButton 
+                            variant="warning"
+                            size="lg"
+                            className="h-16 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-600 hover:text-white"
                             disabled={cart.length === 0 || processing}
                             onClick={sendToKitchen}
+                            icon={ChefHat}
                         >
-                            <ChefHat size={18} />
-                            Send to Kitchen
-                        </button>
-                        <button 
-                            className={cn(
-                                "flex items-center justify-center gap-2 py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all",
-                                currentTotals.subtotal === 0 ? "bg-slate-200 text-slate-400 cursor-not-allowed" : "bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700"
-                            )}
+                            KOT
+                        </AppButton>
+                        <AppButton 
+                            variant="primary"
+                            size="lg"
+                            className="h-16 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-indigo-600 text-white shadow-lg shadow-indigo-100 hover:bg-indigo-700"
                             disabled={currentTotals.subtotal === 0 || processing}
                             onClick={() => {setShowCheckoutModal(true); fetchCustomers();}}
+                            icon={Receipt}
                         >
-                            <Receipt size={18} />
-                            Final Bill
-                        </button>
+                            BILL
+                        </AppButton>
                     </div>
+                    {activeSession && (
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                             <AppButton 
+                                variant="secondary"
+                                size="sm"
+                                className="h-14 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-600 hover:text-white"
+                                disabled={currentTotals.subtotal === 0 || processing}
+                                onClick={handleQuickCash}
+                                icon={CircleDollarSign}
+                            >
+                                QUICK CASH
+                            </AppButton>
+                            <AppButton 
+                                variant="danger"
+                                size="sm"
+                                className="h-14 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-600 hover:text-white"
+                                disabled={processing}
+                                onClick={handleCancelSession}
+                                icon={XCircle}
+                            >
+                                FREE TABLE
+                            </AppButton>
+                        </div>
+                    )}
                     {activeSession && sessionItems.some(i => i.kot_sent && !i.billed) && (
                         <div className="flex gap-2">
                             <button 
@@ -1137,102 +1288,86 @@ const TableBillingPage = () => {
         </div>
       </AppModal>
 
-      {/* Checkout Modal (Phase 3 Overhaul) */}
+      {/* Checkout Modal (Redesigned for Premium UI) */}
       <AppModal
         isOpen={showCheckoutModal}
         onClose={() => setShowCheckoutModal(false)}
         title="Finalize Table Checkout"
-        size="lg"
+        size="xl"
       >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 py-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 py-6">
             {/* Left Column: Bill Summary & Adjustments */}
-            <div className="space-y-6 border-r border-slate-100 pr-8">
-                <div className="bg-slate-50 p-6 rounded-[32px] space-y-3">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Bill Summary</h4>
-                    <div className="flex justify-between text-sm font-bold text-slate-600">
-                        <span>Items Subtotal</span>
-                        <span>Rs. {currentTotals.subtotal.toLocaleString()}</span>
+            <div className="space-y-8">
+                <div className="bg-slate-50 p-8 rounded-[40px] space-y-6 shadow-sm border border-slate-100">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bill Summary</h4>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                        <span className="text-sm font-black text-slate-600">Items Subtotal</span>
+                        <span className="text-lg font-black text-slate-900">Rs. {currentTotals.subtotal.toLocaleString()}</span>
                     </div>
                     
                     {/* Discount Section */}
-                    <div className="space-y-2 pt-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Discount</label>
+                    <div className="space-y-3 pt-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Discount</label>
                         <div className="flex gap-2">
-                            <select 
-                                value={discountType} 
-                                onChange={(e) => setDiscountType(e.target.value)}
-                                className="bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold outline-none focus:border-indigo-600"
-                            >
-                                <option value="fixed">Fixed (Rs)</option>
-                                <option value="percentage">Percent (%)</option>
-                            </select>
+                            <div className="relative flex-1">
+                                <select 
+                                    value={discountType} 
+                                    onChange={(e) => setDiscountType(e.target.value)}
+                                    className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-black outline-none focus:border-indigo-600 shadow-sm appearance-none cursor-pointer"
+                                >
+                                    <option value="fixed">Fixed (Rs)</option>
+                                    <option value="percentage">Percent (%)</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronRight size={14} className="rotate-90" /></div>
+                            </div>
                             <input 
                                 type="number" 
                                 value={discountValue}
                                 onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
-                                className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:border-indigo-600"
+                                className="flex-[1.5] bg-white border border-slate-200 rounded-2xl px-6 py-3 text-lg font-black text-slate-900 outline-none focus:border-indigo-600 shadow-sm"
                                 placeholder="0"
                             />
                         </div>
                     </div>
 
                     {/* Tax & SC Toggles */}
-                    <div className="grid grid-cols-2 gap-3 pt-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <button 
                             onClick={() => setScEnabled(!scEnabled)}
                             className={cn(
-                                "flex items-center justify-between p-3 rounded-xl border-2 transition-all",
+                                "flex items-center justify-between p-4 rounded-2xl border-2 transition-all group",
                                 scEnabled ? "bg-indigo-50 border-indigo-600 text-indigo-900" : "bg-white border-slate-100 text-slate-400"
                             )}
                         >
-                            <span className="text-[10px] font-black uppercase">Service Charge</span>
-                            <div className={cn("w-2 h-2 rounded-full", scEnabled ? "bg-indigo-600" : "bg-slate-300")}></div>
+                            <span className="text-[9px] font-black uppercase leading-tight">Service<br/>Charge</span>
+                            <div className={cn("w-3 h-3 rounded-full shadow-inner transition-all", scEnabled ? "bg-indigo-600 scale-110" : "bg-slate-200")}></div>
                         </button>
                         <button 
                             onClick={() => setTaxEnabled(!taxEnabled)}
                             className={cn(
-                                "flex items-center justify-between p-3 rounded-xl border-2 transition-all",
+                                "flex items-center justify-between p-4 rounded-2xl border-2 transition-all group",
                                 taxEnabled ? "bg-emerald-50 border-emerald-600 text-emerald-900" : "bg-white border-slate-100 text-slate-400"
                             )}
                         >
-                            <span className="text-[10px] font-black uppercase">Government Tax</span>
-                            <div className={cn("w-2 h-2 rounded-full", taxEnabled ? "bg-emerald-600" : "bg-slate-300")}></div>
+                            <span className="text-[9px] font-black uppercase leading-tight">Government<br/>Tax</span>
+                            <div className={cn("w-3 h-3 rounded-full shadow-inner transition-all", taxEnabled ? "bg-emerald-600 scale-110" : "bg-slate-200")}></div>
                         </button>
                     </div>
 
-                    {promotions.length > 0 && (
-                        <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-2">
-                            <div className="flex items-center gap-2">
-                                <Tag size={14} className="text-indigo-600" />
-                                <span className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Available Promotion</span>
-                            </div>
-                            <select 
-                                className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-bold text-indigo-900 outline-none focus:border-indigo-400 shadow-sm"
-                                value={selectedPromo?.id || ''}
-                                onChange={(e) => {
-                                    const promo = promotions.find(p => p.id === parseInt(e.target.value));
-                                    setSelectedPromo(promo || null);
-                                }}
-                            >
-                                <option value="">Apply Promotion...</option>
-                                {promotions.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name} ({p.type === 'percentage_discount' ? `${p.value}%` : `Rs. ${p.value}`})</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-
-                    <div className="pt-4 border-t border-slate-200 space-y-2">
-                        {currentTotals.discountAmount > 0 && (
+                    <div className="pt-6 border-t border-slate-200 space-y-3">
+                        {currentTotals.promoDiscount > 0 && (
                             <div className="flex justify-between text-[10px] font-black text-rose-500 uppercase tracking-widest">
-                                <span>Manual Discount</span>
-                                <span>- Rs. {currentTotals.discountAmount.toLocaleString()}</span>
+                                <span>Promotion Applied</span>
+                                <span>- Rs. {currentTotals.promoDiscount.toLocaleString()}</span>
                             </div>
                         )}
-                        {currentTotals.promoDiscount > 0 && (
-                            <div className="flex justify-between text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-2 py-1 rounded-lg">
-                                <span>Promo: {selectedPromo.name}</span>
-                                <span>- Rs. {currentTotals.promoDiscount.toLocaleString()}</span>
+                        {currentTotals.loyaltyDiscountAmount > 0 && (
+                            <div className="flex justify-between text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                                <span>Loyalty Redemption</span>
+                                <span>- Rs. {currentTotals.loyaltyDiscountAmount.toLocaleString()}</span>
                             </div>
                         )}
                         {scEnabled && (
@@ -1241,42 +1376,77 @@ const TableBillingPage = () => {
                                 <span>+ Rs. {currentTotals.sc.toLocaleString()}</span>
                             </div>
                         )}
-                        {taxEnabled && (
-                            <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                                <span>VAT/Tax ({settings.tax_percentage}%)</span>
-                                <span>+ Rs. {currentTotals.tax.toLocaleString()}</span>
+                        <div className="flex flex-col pt-4">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Grand Total</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-xl font-black text-slate-400">Rs.</span>
+                                <span className="text-6xl font-black text-slate-900 tracking-tight">{currentTotals.grandTotal.toLocaleString()}</span>
                             </div>
-                        )}
-                        <div className="flex justify-between items-end pt-4">
-                            <span className="text-sm font-black text-slate-900 uppercase tracking-widest">Grand Total</span>
-                            <span className="text-3xl font-black text-slate-900">Rs. {currentTotals.grandTotal.toLocaleString()}</span>
                         </div>
                     </div>
                 </div>
 
-                {/* Customer Section (for Naya or Loyalty) */}
-                <div className="space-y-4">
+                {/* Customer Section */}
+                <div className="space-y-4 px-2">
                     <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Customer (Optional)</label>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer (Optional)</label>
                         {selectedCustomer && (
-                            <button onClick={() => setSelectedCustomer(null)} className="text-[10px] font-black text-rose-500 uppercase hover:underline">Clear</button>
+                            <button onClick={() => setSelectedCustomer(null)} className="text-[10px] font-black text-rose-500 uppercase hover:underline flex items-center gap-1"><X size={12} /> Clear</button>
                         )}
                     </div>
                     {selectedCustomer ? (
-                        <div className="p-4 bg-indigo-600 text-white rounded-2xl flex justify-between items-center shadow-lg shadow-indigo-100">
-                            <div>
-                                <p className="font-black text-sm uppercase">{selectedCustomer.name}</p>
-                                <p className="text-[10px] text-indigo-200 font-bold">{selectedCustomer.phone}</p>
+                        <div className="space-y-3">
+                            <div className="p-6 bg-indigo-600 text-white rounded-[32px] flex justify-between items-center shadow-xl shadow-indigo-100 animate-in slide-in-from-left-4 relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <p className="font-black text-base uppercase tracking-tight">{selectedCustomer.name}</p>
+                                    <p className="text-xs text-indigo-200 font-bold">{selectedCustomer.phone}</p>
+                                </div>
+                                <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center relative z-10"><Users size={24} /></div>
+                                <div className="absolute -right-4 -bottom-4 w-20 h-20 bg-white/10 rounded-full blur-2xl"></div>
                             </div>
-                            <Users size={20} />
+                            
+                            <div className="p-5 bg-white border-2 border-indigo-100 rounded-[32px] space-y-4 shadow-sm">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <Star size={16} className="text-amber-500 fill-amber-500" />
+                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Available Points</span>
+                                    </div>
+                                    <span className="text-sm font-black text-indigo-600">{parseFloat(selectedCustomer.loyalty_points || 0).toFixed(0)} Pts</span>
+                                </div>
+                                
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="number" 
+                                        placeholder="Points to redeem..."
+                                        className="flex-1 bg-slate-50 border-none rounded-2xl px-4 py-3 text-sm font-black placeholder:text-slate-300 outline-none focus:bg-indigo-50 transition-all"
+                                        value={loyaltyPointsRedeem || ''}
+                                        onChange={(e) => {
+                                            const val = parseFloat(e.target.value) || 0;
+                                            if (val > parseFloat(selectedCustomer.loyalty_points)) return;
+                                            setLoyaltyPointsRedeem(val);
+                                        }}
+                                    />
+                                    <button 
+                                        onClick={() => setLoyaltyPointsRedeem(parseFloat(selectedCustomer.loyalty_points))}
+                                        className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all"
+                                    >
+                                        MAX
+                                    </button>
+                                </div>
+                                {currentTotals.loyaltyDiscountAmount > 0 && (
+                                    <div className="text-center p-2 bg-indigo-50 rounded-xl">
+                                        <p className="text-[10px] font-black text-indigo-600 uppercase">Discount: Rs. {currentTotals.loyaltyDiscountAmount.toLocaleString()}</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     ) : (
-                        <div className="relative">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <div className="relative group">
+                            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={20} />
                             <input 
                                 type="text" 
                                 placeholder="Search customer for credit/loyalty..." 
-                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl py-2 pl-10 pr-4 text-xs font-bold outline-none focus:border-indigo-600 transition-all"
+                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-[24px] py-4 pl-14 pr-6 text-sm font-black text-slate-900 outline-none focus:bg-white focus:border-indigo-600 transition-all shadow-sm"
                                 value={customerSearch}
                                 onChange={(e) => {
                                     setCustomerSearch(e.target.value);
@@ -1284,17 +1454,22 @@ const TableBillingPage = () => {
                                 }}
                             />
                             {customerSearch && (
-                                <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl mt-1 shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar">
-                                    {filteredCustomers.map(c => (
+                                <div className="absolute top-full left-0 w-full bg-white border border-slate-100 rounded-3xl mt-2 shadow-2xl z-50 max-h-60 overflow-y-auto custom-scrollbar p-2 animate-in fade-in slide-in-from-top-2">
+                                    {filteredCustomers.length > 0 ? filteredCustomers.map(c => (
                                         <button 
                                             key={c.id} 
                                             onClick={() => {setSelectedCustomer(c); setCustomerSearch('');}}
-                                            className="w-full text-left p-3 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                                            className="w-full text-left p-4 hover:bg-indigo-50 rounded-2xl transition-all flex items-center justify-between group"
                                         >
-                                            <p className="text-xs font-black text-slate-900 uppercase">{c.name}</p>
-                                            <p className="text-[10px] font-bold text-slate-400">{c.phone}</p>
+                                            <div>
+                                                <p className="text-sm font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">{c.name}</p>
+                                                <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-400 transition-colors">{c.phone}</p>
+                                            </div>
+                                            <ChevronRight size={16} className="text-slate-300 group-hover:text-indigo-400" />
                                         </button>
-                                    ))}
+                                    )) : (
+                                        <div className="p-4 text-center text-xs font-bold text-slate-400">No customers found</div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1303,104 +1478,129 @@ const TableBillingPage = () => {
             </div>
 
             {/* Right Column: Payment Methods */}
-            <div className="space-y-6">
-                <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+                <div className="flex items-center justify-between mb-6">
                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Payment Details</h4>
-                    <AppButton size="xs" variant="secondary" icon={Plus} onClick={handleAddPaymentRow}>Add Method</AppButton>
+                    <button 
+                        onClick={handleAddPaymentRow}
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest"
+                    >
+                        <Plus size={16} />
+                        Add Method
+                    </button>
                 </div>
                 
-                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                <div className="flex-1 space-y-4 max-h-[450px] overflow-y-auto pr-2 custom-scrollbar pb-6">
                     {payments.map((p, idx) => (
-                        <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 relative group animate-in slide-in-from-right-4">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                    <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Method</label>
-                                    <select 
-                                        value={p.payment_method} 
-                                        onChange={(e) => handleUpdatePayment(idx, 'payment_method', e.target.value)}
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-indigo-600"
-                                    >
-                                        <option value="cash">Cash</option>
-                                        <option value="card">Card</option>
-                                        <option value="bank">Bank Transfer</option>
-                                        <option value="qr">QR / Online</option>
-                                    </select>
+                        <div key={idx} className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 relative group animate-in slide-in-from-right-4 duration-300 shadow-sm">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-[8px] font-black text-slate-400 uppercase ml-2 tracking-widest">Method</label>
+                                    <div className="relative">
+                                        <select 
+                                            value={p.payment_method} 
+                                            onChange={(e) => handleUpdatePayment(idx, 'payment_method', e.target.value)}
+                                            className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-black outline-none focus:border-indigo-600 shadow-sm appearance-none"
+                                        >
+                                            <option value="cash">Cash</option>
+                                            <option value="card">Card</option>
+                                            <option value="bank">Bank Transfer</option>
+                                            <option value="qr">QR / Online</option>
+                                        </select>
+                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronRight size={12} className="rotate-90" /></div>
+                                    </div>
                                 </div>
-                                <div className="space-y-1">
-                                    <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Amount</label>
+                                <div className="space-y-2">
+                                    <label className="text-[8px] font-black text-slate-400 uppercase ml-2 tracking-widest">Amount</label>
                                     <input 
                                         type="number" 
                                         value={p.amount}
                                         onChange={(e) => handleUpdatePayment(idx, 'amount', e.target.value)}
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-indigo-600"
+                                        className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm font-black text-slate-900 outline-none focus:border-indigo-600 shadow-sm"
+                                        placeholder="0"
                                     />
                                 </div>
                             </div>
-                            <div className="mt-2 space-y-1">
-                                <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Ref No / Note</label>
+                            <div className="mt-4 space-y-2">
+                                <label className="text-[8px] font-black text-slate-400 uppercase ml-2 tracking-widest">Ref No / Note</label>
                                 <input 
                                     type="text" 
                                     placeholder="Optional reference..."
                                     value={p.reference_no}
                                     onChange={(e) => handleUpdatePayment(idx, 'reference_no', e.target.value)}
-                                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-bold outline-none focus:border-indigo-600"
+                                    className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-[10px] font-bold text-slate-900 outline-none focus:border-indigo-600 shadow-sm"
                                 />
                             </div>
                             {payments.length > 1 && (
                                 <button 
                                     onClick={() => handleRemovePaymentRow(idx)}
-                                    className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="absolute -top-2 -right-2 w-8 h-8 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-95"
                                 >
-                                    <Minus size={14} />
+                                    <Trash2 size={16} />
                                 </button>
                             )}
                         </div>
                     ))}
                 </div>
 
-                <div className="pt-6 space-y-4">
-                    <div className="flex justify-between items-center p-4 bg-slate-900 rounded-2xl text-white">
-                        <div>
-                            <p className="text-[8px] font-black text-slate-400 uppercase">Balance Due</p>
-                            <p className="text-xl font-black">
+                <div className="pt-6 space-y-6 mt-auto">
+                    <div className="flex justify-between items-center p-6 bg-slate-900 rounded-[32px] text-white shadow-2xl shadow-slate-200 relative overflow-hidden">
+                        <div className="relative z-10">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Balance Due</p>
+                            <p className="text-4xl font-black tracking-tight">
                                 Rs. {Math.max(0, currentTotals.grandTotal - payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0)).toLocaleString()}
                             </p>
                         </div>
-                        {currentTotals.grandTotal <= payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) ? (
-                            <div className="flex items-center gap-2 text-emerald-400">
-                                <CheckCircle2 size={20} />
-                                <span className="text-[10px] font-black uppercase">Covered</span>
-                            </div>
-                        ) : (
-                            <div className="flex items-center gap-2 text-amber-400">
-                                <AlertCircle size={20} />
-                                <span className="text-[10px] font-black uppercase">Partial</span>
-                            </div>
-                        )}
+                        <div className="relative z-10">
+                            {currentTotals.grandTotal <= payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) ? (
+                                <div className="flex items-center gap-2 bg-emerald-500/20 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 animate-in zoom-in-95">
+                                    <CheckCircle2 size={18} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Covered</span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2 bg-amber-500/20 text-amber-400 px-4 py-2 rounded-full border border-amber-500/20">
+                                    <AlertCircle size={18} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Partial</span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-indigo-600 opacity-10 rounded-full blur-3xl"></div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                         <AppButton 
                             variant="primary" 
-                            size="lg" 
-                            className="py-6" 
+                            size="xl" 
+                            className="bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 flex-col py-8" 
                             icon={Wallet} 
                             loading={processing}
                             onClick={handleCheckoutPayNow}
                         >
-                            PAY NOW
+                            <span className="text-xs font-black uppercase tracking-widest opacity-80 mb-1">Pay</span>
+                            NOW
                         </AppButton>
                         <AppButton 
                             variant="credit" 
-                            size="lg" 
-                            className="py-6" 
+                            size="xl" 
+                            className="bg-purple-600 hover:bg-purple-700 shadow-purple-200 flex-col py-8" 
                             icon={BookOpen} 
                             loading={processing}
                             onClick={handleCheckoutCredit}
                         >
-                            ADD TO NAYA
+                            <span className="text-xs font-black uppercase tracking-widest opacity-80 mb-1">Add to</span>
+                            NAYA
                         </AppButton>
                     </div>
+                    <AppButton 
+                        variant="secondary" 
+                        size="lg" 
+                        className="w-full py-6 bg-indigo-50 border-2 border-indigo-100 text-indigo-700 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all rounded-[24px]" 
+                        icon={Zap} 
+                        loading={processing}
+                        onClick={handleQRCheckout}
+                    >
+                        GENERATE QR PAYMENT
+                    </AppButton>
                 </div>
             </div>
         </div>
@@ -1463,7 +1663,7 @@ const TableBillingPage = () => {
                                 <p className="font-black text-xs uppercase">{item.item_name}</p>
                                 <div className="flex justify-between items-end mt-2">
                                     <span className="text-[10px] font-bold opacity-60">QTY: {item.qty}</span>
-                                    <span className="font-black">Rs. {(item.qty * item.unit_price).toLocaleString()}</span>
+                                    <span className="font-black">Rs. {(toNumber(item?.qty) * toNumber(item?.unit_price)).toLocaleString()}</span>
                                 </div>
                             </button>
                         ))}
@@ -1540,6 +1740,23 @@ const TableBillingPage = () => {
         onClose={() => setShowPrintModal(false)} 
         invoice={lastInvoice ? { ...lastInvoice, settings } : null} 
       />
+
+      <PaymentQRModal 
+            isOpen={showQRModal}
+            onClose={() => setShowQRModal(false)}
+            transactionData={qrTransactionData}
+            onSuccess={(data) => {
+                setShowQRModal(false);
+                setLastInvoice({ id: qrTransactionData.invoice_id, invoice_no: qrTransactionData.invoice_no });
+                setShowPrintModal(true);
+                resetSale();
+                fetchData();
+                toast.success('QR Payment Successful!');
+            }}
+            onCancel={() => {
+                setProcessing(false);
+            }}
+        />
 
       <AddToCustomerAccountModal 
         isOpen={showAccountModal}

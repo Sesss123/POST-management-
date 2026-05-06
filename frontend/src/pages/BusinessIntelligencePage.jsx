@@ -18,7 +18,10 @@ import {
   Target,
   Zap,
   Truck,
-  Package
+  Package,
+  TrendingDown,
+  ChefHat,
+  Wallet
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -99,6 +102,7 @@ const BusinessIntelligencePage = () => {
   const salesTrend = data?.sales_trend || [];
   const orderTypeData = data?.order_type_breakdown || [];
   const topItems = data?.top_items || [];
+  const worstItems = data?.worst_items || [];
   const categoryData = data?.category_performance || [];
   const hourlyData = data?.hourly_sales || [];
   const nayaRisk = data?.naya_risk || {};
@@ -123,13 +127,13 @@ const BusinessIntelligencePage = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
-            <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto">
+            <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto overflow-x-auto custom-scrollbar-hide">
                 {['today', '7d', '30d', 'month', 'custom'].map((r) => (
                     <button 
                         key={r}
                         onClick={() => setRange(r)}
                         className={cn(
-                            "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                            "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
                             range === r ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
                         )}
                     >
@@ -162,7 +166,7 @@ const BusinessIntelligencePage = () => {
                 icon={RefreshCw} 
                 onClick={fetchBI} 
                 loading={loading}
-                className="w-full sm:w-auto"
+                className="w-full lg:w-auto"
             >
                 Refresh
             </AppButton>
@@ -171,12 +175,12 @@ const BusinessIntelligencePage = () => {
 
       {/* KPI Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <StatCard title="Total Revenue" value={formatCurrency(kpis.sales_revenue)} icon={DollarSign} variant="primary" />
+          <StatCard title="Gross Sales" value={formatCurrency(kpis.sales_revenue)} icon={DollarSign} variant="primary" />
           <StatCard title="Cash Collected" value={formatCurrency(kpis.cash_collected)} icon={Activity} variant="success" />
-          <StatCard title="Naya/Credit" value={formatCurrency(kpis.credit_outstanding)} icon={CreditCard} variant="credit" />
+          <StatCard title="Expenses" value={formatCurrency(kpis.expenses)} icon={Wallet} variant="warning" />
+          <StatCard title="Est. Net Profit" value={formatCurrency(kpis.net_profit)} icon={ArrowUpRight} variant="success" />
+          <StatCard title="Naya Owed" value={formatCurrency(kpis.credit_outstanding)} icon={CreditCard} variant="credit" />
           <StatCard title="Avg Bill" value={formatCurrency(kpis.average_bill_value)} icon={Zap} />
-          <StatCard title="Total Orders" value={kpis.total_orders} icon={ShoppingCart} />
-          <StatCard title="Quick Retail" value={formatCurrency(kpis.quick_retail_revenue)} icon={BarChart2} variant="dark" />
       </div>
 
       {/* Primary Charts */}
@@ -204,7 +208,7 @@ const BusinessIntelligencePage = () => {
                                 contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px' }}
                                 itemStyle={{ fontWeight: 800, fontSize: '12px' }}
                             />
-                            <Area type="monotone" dataKey="revenue" name="Revenue" stroke="#6366f1" strokeWidth={4} fillOpacity={1} fill="url(#colorRevenue)" />
+                            <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="#6366f1" strokeWidth={4} fillOpacity={1} fill="url(#colorRevenue)" />
                             <Area type="monotone" dataKey="collected" name="Cash Collected" stroke="#10b981" strokeWidth={4} fillOpacity={1} fill="url(#colorCollection)" />
                             <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '10px', fontWeight: 800, textTransform: 'uppercase' }} />
                         </AreaChart>
@@ -223,7 +227,7 @@ const BusinessIntelligencePage = () => {
                           <BarChart data={topItems} layout="vertical" margin={{ top: 0, right: 30, left: 40, bottom: 0 }}>
                               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                               <XAxis type="number" hide />
-                              <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 800, fill: '#475569' }} width={100} />
+                              <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 800, fill: '#475569' }} width={120} />
                               <Tooltip 
                                   cursor={{ fill: '#f8fafc' }}
                                   contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
@@ -303,7 +307,7 @@ const BusinessIntelligencePage = () => {
           </AppCard>
 
           {/* Hourly Distribution */}
-          <AppCard title="Sales by Hour" icon={Clock} subtitle="Peak time identification">
+          <AppCard title="Hourly Sales Heatmap" icon={Clock} subtitle="Peak time identification">
               <div className="h-[280px] w-full mt-2">
                   {hourlyData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
@@ -321,6 +325,7 @@ const BusinessIntelligencePage = () => {
                                   tickLine={false}
                                   tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }}
                                   interval={2}
+                                  label={{ value: 'Hour (24h)', position: 'insideBottom', offset: -10, fontSize: 10, fontWeight: 800 }}
                               />
                               <YAxis hide />
                               <Tooltip
@@ -328,8 +333,9 @@ const BusinessIntelligencePage = () => {
                                   contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '10px 14px' }}
                                   labelStyle={{ fontWeight: 800, fontSize: '12px', marginBottom: '4px', color: '#1e293b' }}
                                   itemStyle={{ fontSize: '11px', fontWeight: 700, color: '#6366f1' }}
+                                  formatter={(val) => [formatCurrency(val), 'Revenue']}
                               />
-                              <Bar dataKey="count" name="Orders" fill="url(#colorHourly)" radius={[6, 6, 0, 0]} maxBarSize={32} />
+                              <Bar dataKey="revenue" name="Revenue" fill="url(#colorHourly)" radius={[6, 6, 0, 0]} maxBarSize={32} />
                           </BarChart>
                       </ResponsiveContainer>
                   ) : (
@@ -339,7 +345,7 @@ const BusinessIntelligencePage = () => {
           </AppCard>
 
           {/* Category Performance */}
-          <AppCard title="Category Performance" icon={PieChartIcon}>
+          <AppCard title="Category Revenue" icon={PieChartIcon}>
               <div className="h-[280px] w-full mt-2">
                   {categoryData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
@@ -370,92 +376,92 @@ const BusinessIntelligencePage = () => {
           </AppCard>
       </div>
 
-      {/* Operational Risk & Lists */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
-          {/* Naya Risk */}
-          <AppCard title="Naya Book Risk" icon={AlertTriangle} bodyClassName="p-0">
-             <div className="p-4 space-y-4">
-                <div className="flex items-center justify-between px-2">
-                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Debtors</span>
-                   <Badge variant="danger">High Risk</Badge>
-                </div>
-                <div className="space-y-2">
-                   {nayaRisk.top_debtors?.length > 0 ? nayaRisk.top_debtors.map((d, i) => (
-                       <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100 transition-hover hover:border-indigo-200 group">
-                          <div>
-                             <p className="text-xs font-black text-slate-900 truncate max-w-[120px]">{d.name}</p>
-                             <p className="text-[9px] font-bold text-slate-400 uppercase">Balance Owed</p>
+      {/* Bottom Row - Worst Items & Risk */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+          {/* Worst Selling Items */}
+          <AppCard title="Worst Selling Items" icon={TrendingDown} subtitle="Lowest sales performance" className="lg:col-span-1">
+              <div className="space-y-3 mt-4">
+                  {worstItems.length > 0 ? worstItems.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100 group transition-all hover:bg-white hover:shadow-md">
+                          <div className="overflow-hidden">
+                              <p className="text-xs font-black text-slate-900 truncate">{item.name}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase">{item.qty} units sold</p>
                           </div>
-                          <span className="text-sm font-black text-rose-600 tracking-tight">{formatCurrency(d.balance)}</span>
-                       </div>
-                   )) : <div className="p-8 text-center text-xs text-slate-400 italic">No active debtors</div>}
-                </div>
-             </div>
-          </AppCard>
-
-          {/* Kitchen Performance */}
-          <AppCard title="Kitchen Pulse" icon={Clock} bodyClassName="p-0">
-              <div className="p-4 space-y-4">
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-100">
-                       <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Avg Prep</p>
-                       <h4 className="text-lg font-black text-indigo-900">{Math.round(kitchen.average_prep_minutes)}m</h4>
-                    </div>
-                    <div className="bg-rose-50 p-3 rounded-2xl border border-rose-100">
-                       <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Delayed</p>
-                       <h4 className="text-lg font-black text-rose-900">{kitchen.delayed_kots}</h4>
-                    </div>
-                 </div>
-                 <div className="space-y-2">
-                    <p className="px-2 text-[10px] font-black uppercase text-slate-400 tracking-widest">Slowest active orders</p>
-                    {kitchen.slowest_orders?.length > 0 ? kitchen.slowest_orders.map((o, i) => (
-                        <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                           <span className="text-xs font-bold text-slate-700">#{o.kot_no}</span>
-                           <Badge variant={o.mins_old > 30 ? 'danger' : 'warning'}>{o.mins_old} mins</Badge>
-                        </div>
-                    )) : <div className="p-8 text-center text-xs text-slate-400 italic">No pending orders</div>}
-                 </div>
+                          <span className="text-xs font-black text-rose-500 whitespace-nowrap">{formatCurrency(item.revenue)}</span>
+                      </div>
+                  )) : <div className="text-center py-8 text-slate-400 italic text-xs">All items are performing well</div>}
               </div>
           </AppCard>
 
-          {/* Supplier Payables */}
-          <AppCard title="Payables Situation" icon={Truck} bodyClassName="p-0">
-             <div className="p-4 space-y-4">
-                <div className="bg-slate-900 p-4 rounded-2xl">
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Payable</p>
-                   <h4 className="text-xl font-black text-white">{formatCurrency(suppliers.total_payable)}</h4>
-                </div>
-                <div className="space-y-2">
-                   {suppliers.top_payables?.length > 0 ? suppliers.top_payables.map((s, i) => (
-                       <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                          <span className="text-xs font-bold text-slate-700 truncate max-w-[100px]">{s.name}</span>
-                          <span className="text-xs font-black text-slate-900">{formatCurrency(s.balance)}</span>
-                       </div>
-                   )) : <div className="p-8 text-center text-xs text-slate-400 italic">No pending payables</div>}
-                </div>
-             </div>
-          </AppCard>
+          {/* Kitchen & Stock Grid */}
+          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Kitchen Performance */}
+              <AppCard title="Kitchen Pulse" icon={ChefHat} bodyClassName="p-0">
+                  <div className="p-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-100">
+                           <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Avg Prep</p>
+                           <h4 className="text-lg font-black text-indigo-900">{Math.round(kitchen.average_prep_minutes)}m</h4>
+                        </div>
+                        <div className="bg-rose-50 p-3 rounded-2xl border border-rose-100">
+                           <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Delayed</p>
+                           <h4 className="text-lg font-black text-rose-900">{kitchen.delayed_kots}</h4>
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <p className="px-2 text-[10px] font-black uppercase text-slate-400 tracking-widest">Slowest active orders</p>
+                        {kitchen.slowest_orders?.length > 0 ? kitchen.slowest_orders.map((o, i) => (
+                            <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                               <span className="text-xs font-bold text-slate-700">#{o.kot_no}</span>
+                               <Badge variant={o.mins_old > 30 ? 'danger' : 'warning'}>{o.mins_old} mins</Badge>
+                            </div>
+                        )) : <div className="p-8 text-center text-xs text-slate-400 italic">No pending orders</div>}
+                    </div>
+                  </div>
+              </AppCard>
 
-          {/* Stock Risks */}
-          <AppCard title="Inventory Watch" icon={Package} bodyClassName="p-0">
-             <div className="p-4 space-y-4">
-                <div className="flex items-center gap-2 px-2">
-                   <Badge variant="danger">{stock.sold_out_items?.length || 0} Sold Out</Badge>
-                   <Badge variant="warning">{stock.low_stock_items?.length || 0} Low Stock</Badge>
-                </div>
-                <div className="space-y-2">
-                   {stock.low_stock_items?.length > 0 ? stock.low_stock_items.map((item, i) => (
-                       <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                          <div>
-                             <p className="text-xs font-black text-slate-900 truncate max-w-[120px]">{item.name}</p>
-                             <p className="text-[9px] font-bold text-slate-400 uppercase">Stock: {item.stock_qty}</p>
-                          </div>
-                          {item.stock_qty <= 0 ? <Badge variant="danger">OUT</Badge> : <Badge variant="warning">LOW</Badge>}
-                       </div>
-                   )) : <div className="p-8 text-center text-xs text-slate-400 italic">Inventory is healthy</div>}
-                </div>
-             </div>
-          </AppCard>
+              {/* Naya Risk */}
+              <AppCard title="Naya Book Risk" icon={AlertTriangle} bodyClassName="p-0">
+                <div className="p-4 space-y-4">
+                    <div className="flex items-center justify-between px-2">
+                       <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Debtors</span>
+                       <Badge variant="danger">High Risk</Badge>
+                    </div>
+                    <div className="space-y-2">
+                       {nayaRisk.top_debtors?.length > 0 ? nayaRisk.top_debtors.map((d, i) => (
+                           <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100 group">
+                              <div>
+                                 <p className="text-xs font-black text-slate-900 truncate max-w-[120px]">{d.name}</p>
+                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Balance Owed</p>
+                              </div>
+                              <span className="text-sm font-black text-rose-600 tracking-tight">{formatCurrency(d.balance)}</span>
+                           </div>
+                       )) : <div className="p-8 text-center text-xs text-slate-400 italic">No active debtors</div>}
+                    </div>
+                 </div>
+              </AppCard>
+
+              {/* Inventory Watch */}
+              <AppCard title="Inventory Watch" icon={Package} bodyClassName="p-0">
+                <div className="p-4 space-y-4">
+                    <div className="flex items-center gap-2 px-2">
+                       <Badge variant="danger">{stock.sold_out_items?.length || 0} Sold Out</Badge>
+                       <Badge variant="warning">{stock.low_stock_items?.length || 0} Low Stock</Badge>
+                    </div>
+                    <div className="space-y-2">
+                       {stock.low_stock_items?.length > 0 ? stock.low_stock_items.map((item, i) => (
+                           <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                              <div>
+                                 <p className="text-xs font-black text-slate-900 truncate max-w-[120px]">{item.name}</p>
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase">Stock: {item.stock_qty}</p>
+                              </div>
+                              {item.stock_qty <= 0 ? <Badge variant="danger">OUT</Badge> : <Badge variant="warning">LOW</Badge>}
+                           </div>
+                       )) : <div className="p-8 text-center text-xs text-slate-400 italic">Inventory is healthy</div>}
+                    </div>
+                 </div>
+              </AppCard>
+          </div>
       </div>
     </div>
   );

@@ -17,7 +17,8 @@ const CustomerPage = () => {
     phone: '',
     address: '',
     credit_limit: 5000,
-    status: 'active'
+    status: 'active',
+    loyalty_enabled: true
   });
 
   useEffect(() => {
@@ -47,7 +48,7 @@ const CustomerPage = () => {
       }
       setShowModal(false);
       setEditingCustomer(null);
-      setFormData({ name: '', phone: '', address: '', credit_limit: 5000, status: 'active' });
+      setFormData({ name: '', phone: '', address: '', credit_limit: 5000, status: 'active', loyalty_enabled: true });
       fetchCustomers();
     } catch (err) {
       toast.error('Operation failed');
@@ -61,7 +62,8 @@ const CustomerPage = () => {
       phone: customer.phone,
       address: customer.address,
       credit_limit: customer.credit_limit,
-      status: customer.status
+      status: customer.status,
+      loyalty_enabled: customer.loyalty_enabled !== 0
     });
     setShowModal(true);
   };
@@ -106,6 +108,7 @@ const CustomerPage = () => {
                 { label: 'Contact' },
                 { label: 'Credit Limit', className: 'text-right' },
                 { label: 'Balance', className: 'text-right' },
+                { label: 'Points', className: 'text-right' },
                 { label: 'Status', className: 'text-right' },
                 { label: 'Actions', className: 'text-right' }
             ]}
@@ -122,6 +125,9 @@ const CustomerPage = () => {
                     <td className="py-5 font-bold text-slate-500">{c.phone}</td>
                     <td className="py-5 text-right font-bold text-slate-700">Rs. {parseFloat(c.credit_limit).toLocaleString()}</td>
                     <td className="py-5 text-right font-black text-rose-600">Rs. {parseFloat(c.current_balance).toLocaleString()}</td>
+                    <td className="py-5 text-right font-black text-indigo-600">
+                        {parseFloat(c.loyalty_points || 0).toFixed(0)}
+                    </td>
                     <td className="py-5 text-right"><StatusBadge status={c.status} /></td>
                     <td className="py-5 text-right">
                         <div className="flex justify-end gap-2">
@@ -157,6 +163,14 @@ const CustomerPage = () => {
                         </div>
                     </div>
 
+                    <div className="bg-indigo-50 p-3 rounded-2xl flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <Star size={14} className="text-amber-500 fill-amber-500" />
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Loyalty Points</span>
+                        </div>
+                        <span className="text-sm font-black text-indigo-600">{parseFloat(c.loyalty_points || 0).toFixed(0)}</span>
+                    </div>
+
                     <div className="flex gap-2 pt-2">
                         <AppButton variant="secondary" size="sm" className="flex-1" onClick={() => handleEdit(c)}>Edit Profile</AppButton>
                         <AppButton variant="primary" size="sm" className="flex-1" onClick={() => navigate(`/customers/${c.uuid || c.id}/ledger`)}>Ledger</AppButton>
@@ -184,6 +198,34 @@ const CustomerPage = () => {
                         <option value="active">Active / Healthy</option>
                         <option value="blocked">Blocked / Suspended</option>
                     </select>
+                </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                        <Star size={20} />
+                    </div>
+                    <div>
+                        <p className="text-xs font-black text-slate-900 uppercase">Loyalty Program</p>
+                        <p className="text-[10px] font-medium text-slate-500">Earn points on every purchase</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">{formData.loyalty_enabled ? 'Enabled' : 'Disabled'}</span>
+                    <button 
+                        type="button"
+                        onClick={() => setFormData({...formData, loyalty_enabled: !formData.loyalty_enabled})}
+                        className={cn(
+                            "w-12 h-6 rounded-full relative transition-all duration-300",
+                            formData.loyalty_enabled ? "bg-indigo-600" : "bg-slate-300"
+                        )}
+                    >
+                        <div className={cn(
+                            "absolute top-1 w-4 h-4 bg-white rounded-full transition-all duration-300",
+                            formData.loyalty_enabled ? "left-7" : "left-1"
+                        )} />
+                    </button>
                 </div>
             </div>
             <div className="flex gap-4 pt-4">

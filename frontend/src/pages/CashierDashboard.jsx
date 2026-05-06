@@ -13,7 +13,8 @@ import {
   ArrowRight,
   Banknote,
   Grid3X3,
-  Zap
+  Zap,
+  CreditCard
 } from 'lucide-react';
 import { StatCard, AppButton } from '../components/ui';
 import { cn } from '../utils/cn';
@@ -187,18 +188,30 @@ const CashierDashboard = () => {
       </section>
 
       {/* Stats Grid */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         <StatCard 
-            title="Today Cash Sales" 
+            title="Today Cash" 
             value={`Rs. ${parseFloat(stats?.summary?.todayCash || 0).toLocaleString()}`} 
             icon={Banknote} 
-            variant="dark"
+            variant="success"
         />
         <StatCard 
-            title="Today Credit Sales" 
+            title="Today QR" 
+            value={`Rs. ${parseFloat(stats?.summary?.todayQR || 0).toLocaleString()}`} 
+            icon={Zap} 
+            variant="primary"
+        />
+        <StatCard 
+            title="Today Card" 
+            value={`Rs. ${parseFloat(stats?.summary?.todayCard || 0).toLocaleString()}`} 
+            icon={CreditCard} 
+            variant="info"
+        />
+        <StatCard 
+            title="Today Credit" 
             value={`Rs. ${parseFloat(stats?.summary?.todayCredit || 0).toLocaleString()}`} 
             icon={BookOpen} 
-            variant="primary"
+            variant="credit"
         />
         <StatCard 
             title="Invoices Today" 
@@ -209,7 +222,7 @@ const CashierDashboard = () => {
             title="Open Tables" 
             value={stats?.summary?.openTables || 0} 
             icon={Grid3X3} 
-            variant="credit"
+            variant="dark"
         />
       </section>
 

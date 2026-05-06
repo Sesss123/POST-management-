@@ -16,9 +16,9 @@ exports.getDebtors = async (req, res) => {
                    (credit_limit - current_balance) as remaining_credit,
                    (SELECT MAX(created_at) FROM customer_ledger WHERE customer_id = customers.id AND type = 'debit') as last_credit_date
             FROM customers 
-            WHERE 1=1
+            WHERE shop_id = ?
         `;
-        const params = [];
+        const params = [req.shopId];
 
         if (include_zero !== 'true') {
             sql += ' AND current_balance > 0';
@@ -46,7 +46,7 @@ exports.getDebtors = async (req, res) => {
 
 exports.getCustomers = async (req, res) => {
     try {
-        const [customers] = await db.query('SELECT * FROM customers ORDER BY name ASC');
+        const [customers] = await db.query('SELECT * FROM customers WHERE shop_id = ? ORDER BY name ASC', [req.shopId]);
         res.json({ success: true, data: customers });
     } catch (error) {
         console.error(error);
@@ -58,14 +58,14 @@ exports.getCustomers = async (req, res) => {
 // @route   POST /api/customers
 // @access  Private
 exports.createCustomer = async (req, res) => {
-    const { name, phone, address, nic, credit_limit, opening_balance = 0, status = 'active' } = req.body;
+    const { name, phone, address, nic, credit_limit, opening_balance = 0, status = 'active', loyalty_enabled = true } = req.body;
     const connection = await db.getConnection();
 
     try {
         await connection.beginTransaction();
 
         // 1. Check for duplicate phone number
-        const [phoneCheck] = await connection.query('SELECT id FROM customers WHERE phone = ?', [phone]);
+        const [phoneCheck] = await connection.query('SELECT id FROM customers WHERE phone = ? AND shop_id = ?', [phone, req.shopId]);
         if (phoneCheck.length > 0) {
             throw new Error('Phone number already exists');
         }
@@ -76,17 +76,17 @@ exports.createCustomer = async (req, res) => {
 
         // 2. Insert customer
         const [result] = await connection.query(
-            'INSERT INTO customers (uuid, name, phone, address, nic, credit_limit, current_balance, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [uuid, name, phone, address, nic, limit, initialBalance, status]
+            'INSERT INTO customers (uuid, name, phone, address, nic, credit_limit, current_balance, loyalty_enabled, status, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [uuid, name, phone, address, nic, limit, initialBalance, loyalty_enabled, status, req.shopId]
         );
         const customerId = result.insertId;
 
         // 3. Create ledger entry for opening balance if > 0
         if (initialBalance > 0) {
             await connection.query(
-                `INSERT INTO customer_ledger (customer_id, type, amount, balance_after, description)
-                 VALUES (?, 'debit', ?, ?, 'Opening balance')`,
-                [customerId, initialBalance, initialBalance]
+                `INSERT INTO customer_ledger (customer_id, type, amount, balance_after, description, shop_id)
+                 VALUES (?, 'debit', ?, ?, 'Opening balance', ?)`,
+                [customerId, initialBalance, initialBalance, req.shopId]
             );
         }
 
@@ -95,7 +95,7 @@ exports.createCustomer = async (req, res) => {
 
         await connection.commit();
         
-        const [newCustomer] = await db.query('SELECT * FROM customers WHERE id = ?', [customerId]);
+        const [newCustomer] = await db.query('SELECT * FROM customers WHERE id = ? AND shop_id = ?', [customerId, req.shopId]);
         res.status(201).json({ success: true, data: newCustomer[0] });
     } catch (error) {
         await connection.rollback();
@@ -110,16 +110,16 @@ exports.createCustomer = async (req, res) => {
 // @route   PUT /api/customers/:id
 // @access  Private
 exports.updateCustomer = async (req, res) => {
-    const { name, phone, address, nic, credit_limit } = req.body;
+    const { name, phone, address, nic, credit_limit, loyalty_enabled } = req.body;
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldCust] = await db.query(`SELECT * FROM customers WHERE ${where.query}`, [where.value]);
+        const [oldCust] = await db.query(`SELECT * FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldCust.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
         const customerId = oldCust[0].id;
 
         await db.query(
-            'UPDATE customers SET name = ?, phone = ?, address = ?, nic = ?, credit_limit = ? WHERE id = ?',
-            [name, phone, address, nic, parseFloat(credit_limit) || 0, customerId]
+            'UPDATE customers SET name = ?, phone = ?, address = ?, nic = ?, credit_limit = ?, loyalty_enabled = ? WHERE id = ? AND shop_id = ?',
+            [name, phone, address, nic, parseFloat(credit_limit) || 0, loyalty_enabled !== false, customerId, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -142,7 +142,7 @@ exports.getCustomerLedger = async (req, res) => {
     try {
         const where = buildIdOrUuidWhere('c', identifier);
         // 1. Get customer details
-        const [customers] = await db.query(`SELECT c.*, (c.credit_limit - c.current_balance) as remaining_credit FROM customers c WHERE ${where.query}`, [where.value]);
+        const [customers] = await db.query(`SELECT c.*, (c.credit_limit - c.current_balance) as remaining_credit FROM customers c WHERE ${where.query} AND c.shop_id = ?`, [where.value, req.shopId]);
         if (customers.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
         const customer = customers[0];
         const customerId = customer.id;
@@ -152,25 +152,25 @@ exports.getCustomerLedger = async (req, res) => {
             SELECT cl.*, i.uuid as invoice_uuid 
             FROM customer_ledger cl
             LEFT JOIN invoices i ON cl.invoice_id = i.id
-            WHERE cl.customer_id = ? 
+            WHERE cl.customer_id = ? AND cl.shop_id = ?
             ORDER BY cl.created_at DESC
-        `, [customerId]);
+        `, [customerId, req.shopId]);
 
         // 3. Get unpaid invoices
         const [unpaidInvoices] = await db.query(`
             SELECT id, uuid, invoice_no, invoice_type, grand_total, paid_amount, balance_amount, payment_status, created_at 
             FROM invoices 
-            WHERE customer_id = ? AND payment_status != 'paid' AND payment_status != 'cancelled'
+            WHERE customer_id = ? AND payment_status != 'paid' AND payment_status != 'cancelled' AND shop_id = ?
             ORDER BY created_at DESC
-        `, [customerId]);
+        `, [customerId, req.shopId]);
 
         // 4. Get recent payments
         const [payments] = await db.query(`
             SELECT * FROM payments 
-            WHERE customer_id = ? 
+            WHERE customer_id = ? AND shop_id = ?
             ORDER BY created_at DESC 
             LIMIT 20
-        `, [customerId]);
+        `, [customerId, req.shopId]);
 
         // Get allocations for these payments
         if (payments.length > 0) {
@@ -179,8 +179,8 @@ exports.getCustomerLedger = async (req, res) => {
                 SELECT pa.*, i.invoice_no 
                 FROM payment_allocations pa 
                 JOIN invoices i ON pa.invoice_id = i.id 
-                WHERE pa.payment_id IN (${paymentIds.join(',')})
-            `);
+                WHERE pa.payment_id IN (${paymentIds.join(',')}) AND pa.shop_id = ?
+            `, [req.shopId]);
 
             // Map allocations back to payments
             payments.forEach(p => {
@@ -190,7 +190,7 @@ exports.getCustomerLedger = async (req, res) => {
 
         // 5. Summary Stats
         const unpaid_invoice_total = unpaidInvoices.reduce((sum, inv) => sum + parseFloat(inv.balance_amount), 0);
-        const [lastPayment] = await db.query('SELECT created_at FROM payments WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1', [customerId]);
+        const [lastPayment] = await db.query('SELECT created_at FROM payments WHERE customer_id = ? AND shop_id = ? ORDER BY created_at DESC LIMIT 1', [customerId, req.shopId]);
         
         res.json({ 
             success: true, 
@@ -224,20 +224,79 @@ exports.getAccountDetails = exports.getCustomerLedger;
 exports.updateCustomerStatus = async (req, res) => {
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldCust] = await db.query(`SELECT id, status FROM customers WHERE ${where.query}`, [where.value]);
+        const [oldCust] = await db.query(`SELECT id, status FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldCust.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
         const customerId = oldCust[0].id;
 
-        await db.query('UPDATE customers SET status = ? WHERE id = ?', [status, customerId]);
+        await db.query('UPDATE customers SET status = ? WHERE id = ? AND shop_id = ?', [status, customerId, req.shopId]);
         
         const action = status === 'blocked' ? 'customer_blocked' : 'customer_unblocked';
         const { logAction } = require('../utils/logger');
         await logAction(req.user.id, action, 'customer', customerId, { status: oldCust[0].status }, { status });
 
-        const [updatedCustomer] = await db.query('SELECT * FROM customers WHERE id = ?', [customerId]);
+        const [updatedCustomer] = await db.query('SELECT * FROM customers WHERE id = ? AND shop_id = ?', [customerId, req.shopId]);
         res.json({ success: true, message: 'Customer status updated', data: updatedCustomer[0] });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+// @desc    Get loyalty history
+// @route   GET /api/customers/:id/loyalty
+// @access  Private
+exports.getLoyaltyHistory = async (req, res) => {
+    try {
+        const where = buildIdOrUuidWhere('c', req.params.id);
+        const [customers] = await db.query(`SELECT id FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
+        if (customers.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
+        const customerId = customers[0].id;
+
+        const [history] = await db.query(`
+            SELECT lt.*, i.invoice_no, i.uuid as invoice_uuid, u.name as created_by_name
+            FROM loyalty_transactions lt
+            LEFT JOIN invoices i ON lt.invoice_id = i.id
+            LEFT JOIN users u ON lt.created_by = u.id
+            WHERE lt.customer_id = ? AND lt.shop_id = ?
+            ORDER BY lt.created_at DESC
+        `, [customerId, req.shopId]);
+
+        res.json({ success: true, data: history });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+// @desc    Adjust loyalty points
+// @route   POST /api/customers/:id/loyalty/adjust
+// @access  Private/Admin
+exports.adjustLoyaltyPoints = async (req, res) => {
+    const { points, description } = req.body;
+    const loyaltyService = require('../services/loyaltyService');
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+        const where = buildIdOrUuidWhere('c', req.params.id);
+        const [customers] = await connection.query(`SELECT id FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
+        if (customers.length === 0) throw new Error('Customer not found');
+        const customerId = customers[0].id;
+
+        await loyaltyService.addPoints(connection, {
+            customerId,
+            amount: parseFloat(points), // For adjust, amount IS points
+            type: 'adjust',
+            description,
+            userId: req.user.id,
+            shopId: req.shopId
+        });
+
+        await connection.commit();
+        res.json({ success: true, message: 'Points adjusted successfully' });
+    } catch (error) {
+        await connection.rollback();
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
+    } finally {
+        connection.release();
     }
 };

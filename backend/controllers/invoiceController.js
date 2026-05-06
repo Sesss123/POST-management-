@@ -1,26 +1,46 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
 const nayaService = require('../services/nayaAccountService');
+const loyaltyService = require('../services/loyaltyService');
 const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
+const { calculateInvoiceTotals } = require('../utils/pricingCalculator');
 
 // Helper to generate invoice number
 const generateInvoiceNo = () => {
     return 'INV-' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
 };
+exports.generateInvoiceNo = generateInvoiceNo;
 
 // Helper to get system settings
-const getSystemSettings = async (connection) => {
-    const [rows] = await connection.query('SELECT * FROM settings');
+const getSystemSettings = async (connection, shopId) => {
+    const [rows] = await connection.query('SELECT * FROM settings WHERE shop_id = ?', [shopId]);
     return rows.reduce((acc, s) => {
         acc[s.setting_key] = s.setting_value;
         return acc;
     }, {});
 };
+exports.getSystemSettings = getSystemSettings;
+
+// Helper to get shop display name safely
+const getShopDisplayName = async (connection, shopId, user = null) => {
+    try {
+        const [rows] = await connection.query(
+            'SELECT setting_value FROM settings WHERE shop_id = ? AND setting_key = "restaurant_name"',
+            [shopId]
+        );
+        if (rows.length > 0 && rows[0].setting_value) return rows[0].setting_value;
+        if (user && user.shopName) return user.shopName;
+        return "RestoLedger POS";
+    } catch (err) {
+        return user && user.shopName ? user.shopName : "RestoLedger POS";
+    }
+};
+exports.getShopDisplayName = getShopDisplayName;
 
 // Helper to calculate promotion discount
-const calculatePromotionDiscount = async (connection, promotion_id, subtotal) => {
+const calculatePromotionDiscount = async (connection, promotion_id, subtotal, shopId) => {
     if (!promotion_id) return 0;
-    const [promos] = await connection.query('SELECT * FROM promotions WHERE id = ? AND status = "active"', [promotion_id]);
+    const [promos] = await connection.query('SELECT * FROM promotions WHERE id = ? AND status = "active" AND shop_id = ?', [promotion_id, shopId]);
     if (promos.length === 0) return 0;
     
     const promo = promos[0];
@@ -32,47 +52,76 @@ const calculatePromotionDiscount = async (connection, promotion_id, subtotal) =>
     }
     return discount;
 };
+exports.calculatePromotionDiscount = calculatePromotionDiscount;
 
 // Helper to deduct stock
-const deductStock = async (connection, items) => {
+const deductStock = async (connection, items, invoiceId, shopId, userId) => {
+    const { generateUuid } = require('../utils/identifier');
+    
     for (const item of items) {
-        if (item.is_combo || item.combo_id) {
-            const comboId = item.combo_id || item.id;
+        // Handle combos and individual items
+        const isCombo = item.item_type === 'combo' || item.is_combo;
+        const mainId = item.item_id || item.id;
+        
+        const componentList = [];
+        if (isCombo) {
             const [components] = await connection.query(
-                'SELECT item_id, qty FROM combo_items WHERE combo_id = ?',
-                [comboId]
+                'SELECT item_id, qty FROM combo_items WHERE combo_id = ? AND shop_id = ?',
+                [mainId, shopId]
             );
             for (const comp of components) {
-                await connection.query(
-                    'UPDATE items SET stock_qty = stock_qty - ? WHERE id = ? AND track_stock = TRUE',
-                    [comp.qty * item.qty, comp.item_id]
-                );
-                // Auto Sold Out Check
-                await connection.query(
-                    'UPDATE items SET availability_status = "sold_out" WHERE id = ? AND track_stock = TRUE AND stock_qty <= 0',
-                    [comp.item_id]
-                );
+                componentList.push({ id: comp.item_id, qty: comp.qty * item.qty });
             }
         } else {
-            const itemId = item.item_id || item.id;
-            await connection.query(
-                'UPDATE items SET stock_qty = stock_qty - ? WHERE id = ? AND track_stock = TRUE',
-                [item.qty, itemId]
+            componentList.push({ id: mainId, qty: item.qty });
+        }
+
+        for (const comp of componentList) {
+            // 1. Check if tracking is enabled
+            const [itemRows] = await connection.query(
+                'SELECT track_stock, stock_qty, name FROM items WHERE id = ? AND shop_id = ?',
+                [comp.id, shopId]
             );
-            // Auto Sold Out Check
-            await connection.query(
-                'UPDATE items SET availability_status = "sold_out" WHERE id = ? AND track_stock = TRUE AND stock_qty <= 0',
-                [itemId]
-            );
+            
+            if (itemRows.length > 0 && itemRows[0].track_stock) {
+                const currentStock = parseFloat(itemRows[0].stock_qty);
+                const newStock = currentStock - comp.qty;
+                
+                // 2. Update stock
+                await connection.query(
+                    'UPDATE items SET stock_qty = ? WHERE id = ? AND shop_id = ?',
+                    [newStock, comp.id, shopId]
+                );
+
+                // 3. Record movement
+                await connection.query(
+                    `INSERT INTO stock_movements (uuid, shop_id, item_id, qty, type, reason, reference_id, reference_type, balance_after, created_by)
+                     VALUES (?, ?, ?, ?, 'out', ?, ?, 'invoice', ?, ?)`,
+                    [generateUuid(), shopId, comp.id, comp.qty, `Sale - Invoice #${invoiceId}`, invoiceId, newStock, userId]
+                );
+
+                // 4. Auto Sold Out Check
+                if (newStock <= 0) {
+                    await connection.query(
+                        'UPDATE items SET availability_status = "sold_out" WHERE id = ? AND shop_id = ?',
+                        [comp.id, shopId]
+                    );
+                }
+            }
         }
     }
 };
+exports.deductStock = deductStock;
 
 // @desc    Create Cash Sale
 // @route   POST /api/invoices/cash-sale
 // @access  Private
 exports.createCashSale = async (req, res) => {
-    const { items, discount_value, discount_type, promotion_id, payment_method, customer_id, order_type = 'takeaway', waiter_id, cash_received } = req.body;
+    const { 
+        items, discount_value, discount_type, promotion_id, payment_method, 
+        customer_id, order_type = 'takeaway', waiter_id, cash_received,
+        loyalty_points_redeem // New field
+    } = req.body;
     const connection = await db.getConnection();
 
     try {
@@ -80,8 +129,9 @@ exports.createCashSale = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Cart is empty' });
         }
         await connection.beginTransaction();
+        connection.shopId = req.shopId;
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
         
         let subtotal = 0;
@@ -92,8 +142,10 @@ exports.createCashSale = async (req, res) => {
             let realPrice = 0;
             let realName = '';
 
+            let noReceiptItem = false;
+
             if (itemInput.is_combo) {
-                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ?', [itemInput.id]);
+                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ? AND shop_id = ?', [itemInput.id, req.shopId]);
                 if (comboData.length === 0) throw new Error(`Combo ID ${itemInput.id} not found`);
                 if (comboData[0].status !== 'active') throw new Error(`Combo ${comboData[0].name} is not active`);
                 
@@ -102,15 +154,16 @@ exports.createCashSale = async (req, res) => {
                 
                 // For combos, we also need to check if all components are available
                 const [components] = await connection.query(
-                    'SELECT i.name, i.availability_status, i.status FROM combo_items ci JOIN items i ON ci.item_id = i.id WHERE ci.combo_id = ?',
-                    [itemInput.id]
+                    'SELECT i.name, i.availability_status, i.status FROM combo_items ci JOIN items i ON ci.item_id = i.id WHERE ci.combo_id = ? AND i.shop_id = ?',
+                    [itemInput.id, req.shopId]
                 );
                 for (const comp of components) {
                     if (comp.status !== 'active') throw new Error(`Component ${comp.name} is inactive`);
                     if (comp.availability_status !== 'available') throw new Error(`Component ${comp.name} is ${comp.availability_status.replace('_', ' ')}`);
                 }
+                noReceiptItem = false;
             } else {
-                const [itemData] = await connection.query('SELECT name, price, status, availability_status, no_receipt_default FROM items WHERE id = ?', [itemInput.id]);
+                const [itemData] = await connection.query('SELECT name, price, status, availability_status, no_receipt_default FROM items WHERE id = ? AND shop_id = ?', [itemInput.id, req.shopId]);
                 if (itemData.length === 0) throw new Error(`Item ID ${itemInput.id} not found`);
                 if (itemData[0].status !== 'active') throw new Error(`Item ${itemData[0].name} is inactive`);
                 if (itemData[0].availability_status !== 'available') {
@@ -119,6 +172,7 @@ exports.createCashSale = async (req, res) => {
                 
                 realPrice = itemData[0].price;
                 realName = itemData[0].name;
+                noReceiptItem = !!itemData[0].no_receipt_default;
             }
 
             let modifierTotal = 0;
@@ -127,8 +181,8 @@ exports.createCashSale = async (req, res) => {
             if (itemInput.modifiers && itemInput.modifiers.length > 0) {
                 const modifierIds = itemInput.modifiers.map(m => m.modifier_id || m.id);
                 const [dbModifiers] = await connection.query(
-                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active"',
-                    [modifierIds]
+                    'SELECT id, name, type, price_delta FROM item_modifiers WHERE id IN (?) AND status = "active" AND shop_id = ?',
+                    [modifierIds, req.shopId]
                 );
 
                 for (const dbMod of dbModifiers) {
@@ -158,7 +212,7 @@ exports.createCashSale = async (req, res) => {
                 combo_id: itemInput.is_combo ? itemInput.id : null,
                 special_note: itemInput.special_note || null,
                 modifiers: itemModifiers,
-                no_receipt_item: !itemInput.is_combo ? (itemData[0].no_receipt_default || false) : false
+                no_receipt_item: noReceiptItem
             });
         }
 
@@ -171,24 +225,39 @@ exports.createCashSale = async (req, res) => {
         }
 
         const discountedSubtotal = subtotal - discount_amount;
-        const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal);
-        const finalSubtotal = Math.max(0, discountedSubtotal - promotion_discount_amount);
+        const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal, req.shopId);
+        let finalSubtotal = Math.max(0, discountedSubtotal - promotion_discount_amount);
+
+        // 2.2 Loyalty Redemption
+        let loyalty_discount_amount = 0;
+        if (customer_id && loyalty_points_redeem > 0) {
+            const loyaltyResult = await loyaltyService.redeemPoints(connection, {
+                customerId: customer_id,
+                points: parseFloat(loyalty_points_redeem),
+                userId: req.user.id,
+                shopId: req.shopId
+            });
+            loyalty_discount_amount = loyaltyResult.discountValue;
+        }
+
+        // 3. Calculate Totals using Centralized Pricing Calculator
+        const totals = calculateInvoiceTotals({
+            items: processedItems,
+            discount_type: discount_type || 'fixed',
+            discount_value: discount_value || 0,
+            promotion_discount: promotion_discount_amount,
+            loyalty_discount: loyalty_discount_amount,
+            order_type,
+            settings
+        });
+
+        const grand_total = totals.grand_total;
 
         // 2.1 Check Discount Approval Limit
         const discountLimit = parseFloat(settings.discount_approval_limit || 0);
-        if (discount_amount > discountLimit && req.user.role !== 'admin') {
+        if (totals.discount_amount > discountLimit && req.user.role !== 'admin') {
             throw new Error(`Discount exceeds approval limit (Max: ${settings.currency_symbol || 'Rs.'} ${discountLimit}). Manager override required.`);
         }
-
-        // 3. Calculate Tax and Service Charge
-        const taxEnabled = settings.tax_enabled === 'true';
-        const scEnabled = settings.service_charge_enabled === 'true';
-        const taxRate = taxEnabled ? parseFloat(settings.tax_rate || 0) : 0;
-        const scRate = scEnabled ? parseFloat(settings.service_charge_rate || 0) : 0;
-        
-        const taxAmount = (finalSubtotal * taxRate) / 100;
-        const scAmount = (finalSubtotal * scRate) / 100;
-        const grand_total = finalSubtotal + taxAmount + scAmount;
 
         let finalWaiterId = waiter_id || null;
         if (!finalWaiterId && req.user.role === 'waiter') {
@@ -217,16 +286,22 @@ exports.createCashSale = async (req, res) => {
                 uuid, invoice_no, customer_id, invoice_type, order_type, waiter_id, payment_status, 
                 payment_method, subtotal, discount_type, discount_value, discount, 
                 promotion_id, promotion_discount_amount,
+                loyalty_points_redeemed, loyalty_discount_amount,
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, cash_received, change_amount, balance_amount, created_by,
-                sale_channel, no_receipt, sale_type
-            ) VALUES (?, ?, ?, 'cash_sale', ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'normal', false, 'restaurant')`,
+                sale_channel, no_receipt, sale_type, shop_id,
+                currency_code, currency_symbol, tax_name, tax_inclusive,
+                receipt_restaurant_name, receipt_restaurant_phone, receipt_restaurant_address, receipt_footer_message, receipt_logo_url
+            ) VALUES (?, ?, ?, 'cash_sale', ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'normal', false, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 invoiceUuid, invoice_no, customer_id || null, order_type, finalWaiterId, payment_method || 'cash',
-                subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
-                promotion_id || null, promotion_discount_amount,
-                taxRate, taxAmount, scRate, scAmount,
-                grand_total, grand_total, finalCashReceived, changeAmount, req.user.id
+                totals.subtotal, discount_type || 'fixed', discount_value || 0, totals.discount_amount,
+                promotion_id || null, totals.promotion_discount,
+                loyalty_points_redeem || 0, totals.loyalty_discount,
+                totals.tax_rate, totals.tax_amount, totals.service_charge_rate, totals.service_charge_amount,
+                totals.grand_total, totals.grand_total, finalCashReceived, changeAmount, req.user.id, req.shopId,
+                settings.currency_code || 'LKR', settings.currency_symbol || 'Rs.', settings.tax_name || 'VAT', totals.tax_inclusive ? 1 : 0,
+                await getShopDisplayName(connection, req.shopId, req.user), settings.restaurant_phone, settings.restaurant_address, settings.receipt_footer_message, settings.receipt_logo_url
             ]
         );
 
@@ -236,9 +311,9 @@ exports.createCashSale = async (req, res) => {
         for (const item of processedItems) {
             const itemUuid = generateUuid();
             const [itemResult] = await connection.query(
-                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note, no_receipt_item)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note, item.no_receipt_item ? 1 : 0]
+                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note, no_receipt_item, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note, item.no_receipt_item ? 1 : 0, req.shopId]
             );
             const invoiceItemId = itemResult.insertId;
 
@@ -247,9 +322,9 @@ exports.createCashSale = async (req, res) => {
                 for (const mod of item.modifiers) {
                     const modUuid = generateUuid();
                     await connection.query(
-                        `INSERT INTO invoice_item_modifiers (uuid, invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta)
-                         VALUES (?, ?, ?, ?, ?, ?)`,
-                        [modUuid, invoiceItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta]
+                        `INSERT INTO invoice_item_modifiers (uuid, invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta, shop_id)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [modUuid, invoiceItemId, mod.modifier_id, mod.name, mod.type, mod.price_delta, req.shopId]
                     );
                 }
             }
@@ -258,13 +333,26 @@ exports.createCashSale = async (req, res) => {
         // 5.1 Record Promotion Usage
         if (promotion_id && promotion_discount_amount > 0) {
             await connection.query(
-                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount) VALUES (?, ?, ?)',
-                [promotion_id, invoiceId, promotion_discount_amount]
+                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount, shop_id) VALUES (?, ?, ?, ?)',
+                [promotion_id, invoiceId, promotion_discount_amount, req.shopId]
             );
         }
 
         // 5.2 Deduct Stock
-        await deductStock(connection, processedItems);
+        await deductStock(connection, processedItems, invoiceId, req.shopId, req.user.id);
+
+        // 5.3 Loyalty Points Earning (Only if paid and not training)
+        if (customer_id && settings.is_training_mode !== 'true') {
+            await loyaltyService.addPoints(connection, {
+                customerId: customer_id,
+                invoiceId: invoiceId,
+                amount: grand_total,
+                type: 'earn',
+                description: `Earned from invoice ${invoice_no}`,
+                userId: req.user.id,
+                shopId: req.shopId
+            });
+        }
 
         // 6. Log Action
         await logAction(req.user.id, 'cash_sale_created', 'invoice', invoiceId, null, { invoice_no, grand_total });
@@ -283,7 +371,7 @@ exports.createCashSale = async (req, res) => {
         fullInvoice.items = invoiceItems;
 
         // Get settings too
-        const [settingsRows] = await connection.query('SELECT * FROM settings');
+        const [settingsRows] = await connection.query('SELECT * FROM settings WHERE shop_id = ?', [req.shopId]);
         fullInvoice.settings = settingsRows.reduce((acc, s) => {
             acc[s.setting_key] = s.setting_value;
             return acc;
@@ -309,24 +397,29 @@ exports.createCashSale = async (req, res) => {
 // @route   POST /api/invoices/table-checkout
 // @access  Private
 exports.createTableCheckout = async (req, res) => {
-    const { session_id, payment_method, discount_value, discount_type, promotion_id, customer_id, cash_received } = req.body;
+    const { 
+        session_id, payment_method, discount_value, discount_type, promotion_id, 
+        customer_id, cash_received,
+        loyalty_points_redeem // New field
+    } = req.body;
     const connection = await db.getConnection();
 
     try {
         await connection.beginTransaction();
+        connection.shopId = req.shopId;
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
 
         // 1. Get Session and Table
         const where = buildIdOrUuidWhere('s', session_id);
-        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND s.shop_id = ?`, [where.value, req.shopId]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
         const sessionInternalId = session.id;
 
         // 2. Get Order Items
-        const [orderItems] = await connection.query('SELECT * FROM order_items WHERE session_id = ? AND status = "active"', [sessionInternalId]);
+        const [orderItems] = await connection.query('SELECT * FROM order_items WHERE session_id = ? AND status = "active" AND shop_id = ?', [sessionInternalId, req.shopId]);
         if (orderItems.length === 0) throw new Error('No active items in session');
 
         // 3. Calculate Totals (Rule 7)
@@ -340,25 +433,43 @@ exports.createTableCheckout = async (req, res) => {
         }
 
         const discountedSubtotal = subtotal - discount_amount;
-        const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal);
-        const finalSubtotal = Math.max(0, discountedSubtotal - promotion_discount_amount);
+        const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal, req.shopId);
+        let finalSubtotal = Math.max(0, discountedSubtotal - promotion_discount_amount);
+
+        // 3.0 Loyalty Redemption
+        let loyalty_discount_amount = 0;
+        const final_customer_id = customer_id || session.customer_id;
+
+        if (final_customer_id && loyalty_points_redeem > 0) {
+            const loyaltyResult = await loyaltyService.redeemPoints(connection, {
+                customerId: final_customer_id,
+                points: parseFloat(loyalty_points_redeem),
+                userId: req.user.id,
+                shopId: req.shopId
+            });
+            loyalty_discount_amount = loyaltyResult.discountValue;
+        }
+
+        // 3. Calculate Totals using Centralized Pricing Calculator
+        const totals = calculateInvoiceTotals({
+            items: orderItems,
+            discount_type: discount_type || 'fixed',
+            discount_value: discount_value || 0,
+            promotion_discount: promotion_discount_amount,
+            loyalty_discount: loyalty_discount_amount,
+            order_type: session.order_type || 'dine_in',
+            settings
+        });
+
+        const grand_total = totals.grand_total;
 
         // 3.1 Check Discount Approval Limit
         const discountLimit = parseFloat(settings.discount_approval_limit || 0);
-        if (discount_amount > discountLimit && req.user.role !== 'admin') {
+        if (totals.discount_amount > discountLimit && req.user.role !== 'admin') {
             throw new Error(`Discount exceeds approval limit (Max: ${settings.currency_symbol || 'Rs.'} ${discountLimit}). Manager override required.`);
         }
-        const taxEnabled = settings.tax_enabled === 'true';
-        const scEnabled = settings.service_charge_enabled === 'true';
-        const taxRate = taxEnabled ? parseFloat(settings.tax_rate || 0) : 0;
-        const scRate = scEnabled ? parseFloat(settings.service_charge_rate || 0) : 0;
-        const taxAmount = (finalSubtotal * taxRate) / 100;
-        const scAmount = (finalSubtotal * scRate) / 100;
-        const grand_total = finalSubtotal + taxAmount + scAmount;
 
         const isCredit = payment_method === 'credit';
-        const final_customer_id = customer_id || session.customer_id;
-
         if (isCredit && !final_customer_id) throw new Error('Customer required for credit sale');
 
         // 3.2 Validate Cash Received
@@ -381,7 +492,8 @@ exports.createTableCheckout = async (req, res) => {
         if (isCredit) {
             await nayaService.validateCreditLimit(connection, {
                 customerId: final_customer_id,
-                amount: grand_total
+                amount: grand_total,
+                shopId: req.shopId
             });
         }
 
@@ -392,16 +504,22 @@ exports.createTableCheckout = async (req, res) => {
                 uuid, invoice_no, customer_id, table_id, session_id, invoice_type, 
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 promotion_id, promotion_discount_amount,
+                loyalty_points_redeemed, loyalty_discount_amount,
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
-                grand_total, paid_amount, cash_received, change_amount, balance_amount, created_by, sale_type
-            ) VALUES (?, ?, ?, ?, ?, ?, 'table_sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restaurant')`,
+                grand_total, paid_amount, cash_received, change_amount, balance_amount, created_by, sale_type, shop_id,
+                currency_code, currency_symbol, tax_name, tax_inclusive,
+                receipt_restaurant_name, receipt_restaurant_phone, receipt_restaurant_address, receipt_footer_message, receipt_logo_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 invoiceUuid, invoice_no, final_customer_id, session.table_id, sessionInternalId,
                 isCredit ? 'unpaid' : 'paid', payment_method,
-                subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
-                promotion_id || null, promotion_discount_amount,
-                taxRate, taxAmount, scRate, scAmount,
-                grand_total, isCredit ? 0 : grand_total, isCredit ? 0 : finalCashReceived, isCredit ? 0 : changeAmount, isCredit ? grand_total : 0, req.user.id
+                totals.subtotal, discount_type || 'fixed', discount_value || 0, totals.discount_amount,
+                promotion_id || null, totals.promotion_discount,
+                loyalty_points_redeem || 0, totals.loyalty_discount,
+                totals.tax_rate, totals.tax_amount, totals.service_charge_rate, totals.service_charge_amount,
+                totals.grand_total, isCredit ? 0 : totals.grand_total, isCredit ? 0 : finalCashReceived, isCredit ? 0 : changeAmount, isCredit ? totals.grand_total : 0, req.user.id, req.shopId,
+                settings.currency_code || 'LKR', settings.currency_symbol || 'Rs.', settings.tax_name || 'VAT', totals.tax_inclusive ? 1 : 0,
+                await getShopDisplayName(connection, req.shopId, req.user), settings.restaurant_phone, settings.restaurant_address, settings.receipt_footer_message, settings.receipt_logo_url
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -410,20 +528,20 @@ exports.createTableCheckout = async (req, res) => {
         for (const item of orderItems) {
             const itemUuid = generateUuid();
             const [invoiceItemResult] = await connection.query(
-                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note]
+                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note, req.shopId]
             );
             const invoiceItemId = invoiceItemResult.insertId;
 
             // Copy modifiers
-            const [mods] = await connection.query('SELECT * FROM order_item_modifiers WHERE order_item_id = ?', [item.id]);
+            const [mods] = await connection.query('SELECT * FROM order_item_modifiers WHERE order_item_id = ? AND shop_id = ?', [item.id, req.shopId]);
             for (const mod of mods) {
                 const modUuid = generateUuid();
                 await connection.query(
-                    `INSERT INTO invoice_item_modifiers (uuid, invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-                    [modUuid, invoiceItemId, mod.modifier_id, mod.modifier_name, mod.modifier_type, mod.price_delta]
+                    `INSERT INTO invoice_item_modifiers (uuid, invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta, shop_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    [modUuid, invoiceItemId, mod.modifier_id, mod.modifier_name, mod.modifier_type, mod.price_delta, req.shopId]
                 );
             }
         }
@@ -431,13 +549,26 @@ exports.createTableCheckout = async (req, res) => {
         // 5.1 Record Promotion Usage
         if (promotion_id && promotion_discount_amount > 0) {
             await connection.query(
-                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount) VALUES (?, ?, ?)',
-                [promotion_id, invoiceId, promotion_discount_amount]
+                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount, shop_id) VALUES (?, ?, ?, ?)',
+                [promotion_id, invoiceId, promotion_discount_amount, req.shopId]
             );
         }
 
         // 5.2 Deduct Stock
-        await deductStock(connection, orderItems);
+        await deductStock(connection, orderItems, invoiceId, req.shopId, req.user.id);
+
+        // 5.3 Loyalty Points Earning (Only if paid and not training)
+        if (!isCredit && final_customer_id && settings.is_training_mode !== 'true') {
+            await loyaltyService.addPoints(connection, {
+                customerId: final_customer_id,
+                invoiceId: invoiceId,
+                amount: grand_total,
+                type: 'earn',
+                description: `Earned from table sale ${invoice_no}`,
+                userId: req.user.id,
+                shopId: req.shopId
+            });
+        }
 
         // 6. Naya Integration
         if (isCredit) {
@@ -445,13 +576,14 @@ exports.createTableCheckout = async (req, res) => {
                 customerId: final_customer_id,
                 invoiceId: invoiceId,
                 amount: grand_total,
-                description: `Table sale credit - Inv: ${invoice_no}`
+                description: `Table sale credit - Inv: ${invoice_no}`,
+                shopId: req.shopId
             });
         }
 
         // 7. Close Session and Table
-        await connection.query('UPDATE table_sessions SET status = ?, closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', [isCredit ? 'credit' : 'paid', req.user.id, sessionInternalId]);
-        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
+        await connection.query('UPDATE table_sessions SET status = ?, closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?', [isCredit ? 'credit' : 'paid', req.user.id, sessionInternalId, req.shopId]);
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
 
         await logAction(req.user.id, 'invoice_created', 'invoice', invoiceId, null, { invoice_no, grand_total, method: payment_method });
 
@@ -462,14 +594,14 @@ exports.createTableCheckout = async (req, res) => {
              LEFT JOIN customers c ON i.customer_id = c.id
              LEFT JOIN restaurant_tables t ON i.table_id = t.id
              LEFT JOIN users u ON i.created_by = u.id
-             WHERE i.id = ?`,
-            [invoiceId]
+             WHERE i.id = ? AND i.shop_id = ?`,
+            [invoiceId, req.shopId]
         );
         const fullInvoice = fullInvoices[0];
-        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
+        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
         fullInvoice.items = invoiceItems;
 
-        const [settingsRows] = await connection.query('SELECT * FROM settings');
+        const [settingsRows] = await connection.query('SELECT * FROM settings WHERE shop_id = ?', [req.shopId]);
         fullInvoice.settings = settingsRows.reduce((acc, s) => {
             acc[s.setting_key] = s.setting_value;
             return acc;
@@ -498,10 +630,11 @@ exports.getInvoices = async (req, res) => {
             LEFT JOIN customers c ON i.customer_id = c.id
             LEFT JOIN restaurant_tables t ON i.table_id = t.id
             LEFT JOIN users u ON i.created_by = u.id
+            WHERE i.shop_id = ?
             ORDER BY i.created_at DESC
             LIMIT 100
         `;
-        const [invoices] = await db.query(query);
+        const [invoices] = await db.query(query, [req.shopId]);
         res.json({ success: true, data: invoices });
     } catch (error) {
         console.error(error);
@@ -521,20 +654,20 @@ exports.getInvoiceDetails = async (req, res) => {
              LEFT JOIN customers c ON i.customer_id = c.id
              LEFT JOIN restaurant_tables t ON i.table_id = t.id
              LEFT JOIN users u ON i.created_by = u.id
-             WHERE ${where.query}`,
-            [where.value]
+             WHERE ${where.query} AND i.shop_id = ?`,
+            [where.value, req.shopId]
         );
         
         if (invoices.length === 0) return res.status(404).json({ success: false, message: 'Invoice not found' });
         const invoice = invoices[0];
         const invoiceId = invoice.id;
         
-        const [items] = await db.query('SELECT * FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
+        const [items] = await db.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
         
         for (let item of items) {
             const [itemMods] = await db.query(
-                'SELECT modifier_name as name, modifier_type as type, price_delta FROM invoice_item_modifiers WHERE invoice_item_id = ?',
-                [item.id]
+                'SELECT modifier_name as name, modifier_type as type, price_delta FROM invoice_item_modifiers WHERE invoice_item_id = ? AND shop_id = ?',
+                [item.id, req.shopId]
             );
             item.modifiers = itemMods;
         }
@@ -543,7 +676,7 @@ exports.getInvoiceDetails = async (req, res) => {
         invoice.items = items;
 
         // Add restaurant settings for printing
-        const [settingsRows] = await db.query('SELECT * FROM settings');
+        const [settingsRows] = await db.query('SELECT * FROM settings WHERE shop_id = ?', [req.shopId]);
         invoice.settings = settingsRows.reduce((acc, s) => {
             acc[s.setting_key] = s.setting_value;
             return acc;
@@ -567,7 +700,7 @@ exports.cancelInvoice = async (req, res) => {
         await connection.beginTransaction();
 
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [invoices] = await connection.query(`SELECT * FROM invoices WHERE ${where.query}`, [where.value]);
+        const [invoices] = await connection.query(`SELECT * FROM invoices WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (invoices.length === 0) throw new Error('Invoice not found');
         
         const invoice = invoices[0];
@@ -576,29 +709,30 @@ exports.cancelInvoice = async (req, res) => {
         if (invoice.payment_status === 'cancelled') throw new Error('Invoice already cancelled');
 
         await connection.query(
-            'UPDATE invoices SET payment_status = "cancelled", cancel_reason = ? WHERE id = ?',
-            [reason, invoiceId]
+            'UPDATE invoices SET payment_status = "cancelled", cancel_reason = ? WHERE id = ? AND shop_id = ?',
+            [reason, invoiceId, req.shopId]
         );
 
         // If it was a credit sale, reverse the customer balance
         if (invoice.payment_method === 'credit') {
             await connection.query(
-                'UPDATE customers SET current_balance = current_balance - ? WHERE id = ?',
-                [invoice.grand_total, invoice.customer_id]
+                'UPDATE customers SET current_balance = current_balance - ? WHERE id = ? AND shop_id = ?',
+                [invoice.grand_total, invoice.customer_id, req.shopId]
             );
 
             // Get new balance for ledger
-            const [customers] = await connection.query('SELECT current_balance FROM customers WHERE id = ?', [invoice.customer_id]);
+            const [customers] = await connection.query('SELECT current_balance FROM customers WHERE id = ? AND shop_id = ?', [invoice.customer_id, req.shopId]);
             
             await connection.query(
-                `INSERT INTO customer_ledger (customer_id, invoice_id, type, amount, balance_after, description)
-                 VALUES (?, ?, 'credit', ?, ?, ?)`,
+                `INSERT INTO customer_ledger (customer_id, invoice_id, type, amount, balance_after, description, shop_id)
+                 VALUES (?, ?, 'credit', ?, ?, ?, ?)`,
                 [
                     invoice.customer_id, 
                     invoice.id, 
                     invoice.grand_total, 
                     customers[0].current_balance, 
-                    `REVERSAL - Cancelled Invoice: ${invoice.invoice_no}`
+                    `REVERSAL - Cancelled Invoice: ${invoice.invoice_no}`,
+                    req.shopId
                 ]
             );
         }
@@ -630,14 +764,14 @@ exports.splitBill = async (req, res) => {
         const invoice_no = generateInvoiceNo();
 
         // 1. Get Session
-        const [sessions] = await connection.query('SELECT * FROM table_sessions WHERE id = ? AND status = "open"', [session_id]);
+        const [sessions] = await connection.query('SELECT * FROM table_sessions WHERE id = ? AND status = "open" AND shop_id = ?', [session_id, req.shopId]);
         if (sessions.length === 0) throw new Error('Active session not found');
         const session = sessions[0];
 
         // 2. Get Specific Order Items
         const [orderItems] = await connection.query(
-            'SELECT * FROM order_items WHERE id IN (?) AND session_id = ? AND status != "billed"', 
-            [order_item_ids, session_id]
+            'SELECT * FROM order_items WHERE id IN (?) AND session_id = ? AND status != "billed" AND shop_id = ?', 
+            [order_item_ids, session_id, req.shopId]
         );
         if (orderItems.length === 0) throw new Error('No billable items selected');
 
@@ -688,15 +822,15 @@ exports.splitBill = async (req, res) => {
                 payment_status, payment_method, subtotal, discount_type, discount_value, discount, 
                 promotion_id, promotion_discount_amount,
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
-                grand_total, paid_amount, balance_amount, created_by
-            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
+                grand_total, paid_amount, balance_amount, created_by, shop_id
+            ) VALUES (?, ?, ?, ?, ?, 'table_sale', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
                 invoiceUuid, invoice_no, final_customer_id, session.table_id, session_id,
                 isCredit ? 'unpaid' : 'paid', payment_method,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 promotion_id || null, promotion_discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grand_total, isCredit ? 0 : grand_total, isCredit ? grand_total : 0, req.user.id
+                grand_total, isCredit ? 0 : grand_total, isCredit ? grand_total : 0, req.user.id, req.shopId
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -704,21 +838,21 @@ exports.splitBill = async (req, res) => {
         // 5. Insert Items and mark as billed
         for (const item of orderItems) {
             const [invoiceItemResult] = await connection.query(
-                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note]
+                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note, req.shopId]
             );
             const invoiceItemId = invoiceItemResult.insertId;
 
             // Copy modifiers
             await connection.query(
-                `INSERT INTO invoice_item_modifiers (invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta)
-                 SELECT ?, modifier_id, modifier_name, modifier_type, price_delta
+                `INSERT INTO invoice_item_modifiers (invoice_item_id, modifier_id, modifier_name, modifier_type, price_delta, shop_id)
+                 SELECT ?, modifier_id, modifier_name, modifier_type, price_delta, ?
                  FROM order_item_modifiers WHERE order_item_id = ?`,
-                [invoiceItemId, item.id]
+                [invoiceItemId, req.shopId, item.id]
             );
 
-            await connection.query('UPDATE order_items SET status = "billed" WHERE id = ?', [item.id]);
+            await connection.query('UPDATE order_items SET status = "billed" WHERE id = ? AND shop_id = ?', [item.id, req.shopId]);
         }
 
         // 5.1 Record Promotion Usage
@@ -738,15 +872,16 @@ exports.splitBill = async (req, res) => {
                 customerId: final_customer_id,
                 invoiceId: invoiceId,
                 amount: grand_total,
-                description: `Split bill credit - Inv: ${invoice_no}`
+                description: `Split bill credit - Inv: ${invoice_no}`,
+                shopId: req.shopId
             });
         }
 
         // 7. Check if session should be closed (if no active items left)
-        const [remainingItems] = await connection.query('SELECT id FROM order_items WHERE session_id = ? AND status IN ("active", "served")', [session_id]);
+        const [remainingItems] = await connection.query('SELECT id FROM order_items WHERE session_id = ? AND status IN ("active", "served") AND shop_id = ?', [session_id, req.shopId]);
         if (remainingItems.length === 0) {
-            await connection.query('UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', [req.user.id, session_id]);
-            await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [session.table_id]);
+            await connection.query('UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?', [req.user.id, session_id, req.shopId]);
+            await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);
         }
 
         await logAction(req.user.id, 'split_invoice_created', 'invoice', invoiceId, null, { invoice_no, grand_total, method: payment_method });
@@ -770,7 +905,11 @@ exports.splitBill = async (req, res) => {
 // @route   POST /api/invoices/cash-sale/add-to-credit
 // @access  Private
 exports.createCashSaleCredit = async (req, res) => {
-    const { items, discount_value, discount_type, promotion_id, customer_id, order_type = 'takeaway', waiter_id } = req.body;
+    const { 
+        items, discount_value, discount_type, promotion_id, 
+        customer_id, order_type = 'takeaway', waiter_id,
+        loyalty_points_redeem // New field
+    } = req.body;
     const connection = await db.getConnection();
 
     try {
@@ -782,7 +921,7 @@ exports.createCashSaleCredit = async (req, res) => {
         }
         await connection.beginTransaction();
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
         
         let subtotal = 0;
@@ -794,13 +933,13 @@ exports.createCashSaleCredit = async (req, res) => {
             let realName = '';
 
             if (itemInput.is_combo) {
-                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ?', [itemInput.id]);
+                const [comboData] = await connection.query('SELECT name, price, status FROM combo_meals WHERE id = ? AND shop_id = ?', [itemInput.id, req.shopId]);
                 if (comboData.length === 0) throw new Error(`Combo ID ${itemInput.id} not found`);
                 if (comboData[0].status !== 'active') throw new Error(`Combo ${comboData[0].name} is not active`);
                 realPrice = comboData[0].price;
                 realName = comboData[0].name;
             } else {
-                const [itemData] = await connection.query('SELECT name, price, availability_status, status FROM items WHERE id = ?', [itemInput.id]);
+                const [itemData] = await connection.query('SELECT name, price, availability_status, status FROM items WHERE id = ? AND shop_id = ?', [itemInput.id, req.shopId]);
                 if (itemData.length === 0) throw new Error(`Item ID ${itemInput.id} not found`);
                 if (itemData[0].status !== 'active') throw new Error(`Item ${itemData[0].name} is not active`);
                 if (itemData[0].availability_status === 'sold_out') throw new Error(`Item ${itemData[0].name} is sold out`);
@@ -823,7 +962,7 @@ exports.createCashSaleCredit = async (req, res) => {
         // 2. Discounts & Promos
         let promotion_discount_amount = 0;
         if (promotion_id) {
-            promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, subtotal);
+            promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, subtotal, req.shopId);
         }
 
         let discount_amount = 0;
@@ -835,7 +974,21 @@ exports.createCashSaleCredit = async (req, res) => {
             discount_amount = parseFloat(discount_value) || 0;
         }
 
-        const finalSubtotal = prePromoSubtotal - discount_amount;
+        const preLoyaltySubtotal = prePromoSubtotal - discount_amount;
+        let finalSubtotal = preLoyaltySubtotal;
+
+        // 2.1 Loyalty Redemption
+        let loyalty_discount_amount = 0;
+        if (customer_id && loyalty_points_redeem > 0) {
+            const loyaltyResult = await loyaltyService.redeemPoints(connection, {
+                customerId: customer_id,
+                points: parseFloat(loyalty_points_redeem),
+                userId: req.user.id,
+                shopId: req.shopId
+            });
+            loyalty_discount_amount = loyaltyResult.discountValue;
+            finalSubtotal = Math.max(0, finalSubtotal - loyalty_discount_amount);
+        }
 
         // Discount approval check
         const discountLimit = parseFloat(settings.discount_approval_limit || 0);
@@ -859,7 +1012,8 @@ exports.createCashSaleCredit = async (req, res) => {
         // 3.2 Validate credit limit before proceeding
         await nayaService.validateCreditLimit(connection, {
             customerId: customer_id,
-            amount: grand_total
+            amount: grand_total,
+            shopId: req.shopId
         });
 
         // 4. Create Invoice (unpaid/credit)
@@ -869,15 +1023,17 @@ exports.createCashSaleCredit = async (req, res) => {
                 uuid, invoice_no, customer_id, invoice_type, order_type, waiter_id, payment_status, 
                 payment_method, subtotal, discount_type, discount_value, discount, 
                 promotion_id, promotion_discount_amount,
+                loyalty_points_redeemed, loyalty_discount_amount,
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
-                grand_total, paid_amount, balance_amount, created_by
-            ) VALUES (?, ?, ?, 'credit_sale', ?, ?, 'unpaid', 'credit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-            [
+                grand_total, paid_amount, balance_amount, created_by, shop_id
+            ) VALUES (?, ?, ?, 'credit_sale', ?, ?, 'unpaid', 'credit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                [
                 invoiceUuid, invoice_no, customer_id, order_type, finalWaiterId,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 promotion_id || null, promotion_discount_amount,
+                loyalty_points_redeem || 0, loyalty_discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grand_total, grand_total, req.user.id
+                grand_total, grand_total, req.user.id, req.shopId
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -886,9 +1042,9 @@ exports.createCashSaleCredit = async (req, res) => {
         for (const item of processedItems) {
             const itemUuid = generateUuid();
             await connection.query(
-                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total]
+                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemUuid, invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, req.shopId]
             );
         }
 
@@ -897,14 +1053,15 @@ exports.createCashSaleCredit = async (req, res) => {
             customerId: customer_id,
             invoiceId: invoiceId,
             amount: grand_total,
-            description: `Cash sale (Credit) - Inv: ${invoice_no}`
+            description: `Cash sale (Credit) - Inv: ${invoice_no}`,
+            shopId: req.shopId
         });
 
         // 7. Stock & Promotion usage
         if (promotion_id && promotion_discount_amount > 0) {
             await connection.query(
-                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount) VALUES (?, ?, ?)',
-                [promotion_id, invoiceId, promotion_discount_amount]
+                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount, shop_id) VALUES (?, ?, ?, ?)',
+                [promotion_id, invoiceId, promotion_discount_amount, req.shopId]
             );
         }
         await deductStock(connection, processedItems);
@@ -917,11 +1074,11 @@ exports.createCashSaleCredit = async (req, res) => {
              FROM invoices i
              LEFT JOIN customers c ON i.customer_id = c.id
              LEFT JOIN users u ON i.created_by = u.id
-             WHERE i.id = ?`,
-            [invoiceId]
+             WHERE i.id = ? AND i.shop_id = ?`,
+            [invoiceId, req.shopId]
         );
         const fullInvoice = fullInvoices[0];
-        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
+        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
         fullInvoice.items = invoiceItems;
         fullInvoice.new_customer_balance = nayaResult.newBalance;
 
@@ -942,7 +1099,7 @@ exports.voidInvoice = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const [invoice] = await connection.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+        const [invoice] = await connection.query('SELECT * FROM invoices WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
         if (invoice.length === 0) throw new Error('Invoice not found');
 
         // Only allow voiding within 15 minutes of creation
@@ -952,29 +1109,29 @@ exports.voidInvoice = async (req, res) => {
         if (diff > 15) throw new Error('Cannot void invoice after 15 minutes. Use "Cancel" instead.');
 
         // 1. Get items to restore stock
-        const [items] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ?', [req.params.id]);
+        const [items] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [req.params.id, req.shopId]);
 
         // 2. Restore Stock
         for (const item of items) {
             if (item.item_type === 'item') {
-                await connection.query('UPDATE items SET stock_qty = stock_qty + ? WHERE id = ? AND track_stock = TRUE', [item.qty, item.item_id]);
+                await connection.query('UPDATE items SET stock_qty = stock_qty + ? WHERE id = ? AND track_stock = TRUE AND shop_id = ?', [item.qty, item.item_id, req.shopId]);
                 // Re-enable availability if stock > 0
-                await connection.query('UPDATE items SET availability_status = "available" WHERE id = ? AND track_stock = TRUE AND stock_qty > 0', [item.item_id]);
+                await connection.query('UPDATE items SET availability_status = "available" WHERE id = ? AND track_stock = TRUE AND stock_qty > 0 AND shop_id = ?', [item.item_id, req.shopId]);
             } else if (item.item_type === 'combo') {
-                const [comboItems] = await connection.query('SELECT item_id, qty FROM combo_items WHERE combo_id = ?', [item.item_id]);
+                const [comboItems] = await connection.query('SELECT item_id, qty FROM combo_items WHERE combo_id = ? AND shop_id = ?', [item.item_id, req.shopId]);
                 for (const ci of comboItems) {
-                    await connection.query('UPDATE items SET stock_qty = stock_qty + ? WHERE id = ? AND track_stock = TRUE', [ci.qty * item.qty, ci.item_id]);
-                    await connection.query('UPDATE items SET availability_status = "available" WHERE id = ? AND track_stock = TRUE AND stock_qty > 0', [ci.item_id]);
+                    await connection.query('UPDATE items SET stock_qty = stock_qty + ? WHERE id = ? AND track_stock = TRUE AND shop_id = ?', [ci.qty * item.qty, ci.item_id, req.shopId]);
+                    await connection.query('UPDATE items SET availability_status = "available" WHERE id = ? AND track_stock = TRUE AND stock_qty > 0 AND shop_id = ?', [ci.item_id, req.shopId]);
                 }
             }
         }
 
         // 3. Delete promotion usage if any
-        await connection.query('DELETE FROM promotion_usage WHERE invoice_id = ?', [req.params.id]);
+        await connection.query('DELETE FROM promotion_usage WHERE invoice_id = ? AND shop_id = ?', [req.params.id, req.shopId]);
 
         // 4. Delete invoice items and invoice
-        await connection.query('DELETE FROM invoice_items WHERE invoice_id = ?', [req.params.id]);
-        await connection.query('DELETE FROM invoices WHERE id = ?', [req.params.id]);
+        await connection.query('DELETE FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [req.params.id, req.shopId]);
+        await connection.query('DELETE FROM invoices WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
 
         await logAction(req.user.id, 'invoice_voided', 'invoice', req.params.id, invoice[0], null);
 
@@ -1025,7 +1182,7 @@ exports.createQuickSale = async (req, res) => {
 
         // 1. Calculate subtotal from real prices
         for (const itemInput of items) {
-            const [itemData] = await connection.query('SELECT name, price, status, availability_status, requires_age_confirmation, no_receipt_default FROM items WHERE id = ?', [itemInput.item_id || itemInput.id]);
+            const [itemData] = await connection.query('SELECT name, price, status, availability_status, requires_age_confirmation, no_receipt_default FROM items WHERE id = ? AND shop_id = ?', [itemInput.item_id || itemInput.id, req.shopId]);
             if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id || itemInput.id} not found`);
             if (itemData[0].status !== 'active') throw new Error(`Item ${itemData[0].name} is inactive`);
             if (itemData[0].availability_status !== 'available') {
@@ -1079,14 +1236,13 @@ exports.createQuickSale = async (req, res) => {
                 invoice_no, invoice_type, payment_status, payment_method, subtotal, 
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, cash_received, change_amount, balance_amount, created_by,
-                sale_channel, no_receipt, receipt_printed
-            ) VALUES (?, 'cash_sale', 'paid', 'cash', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'quick_no_receipt', true, false)`,
+                sale_channel, no_receipt, receipt_printed, shop_id
+            ) VALUES (?, 'cash_sale', 'paid', 'cash', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'quick_no_receipt', true, false, ?)`,
             [
                 invoice_no, subtotal, taxRate, taxAmount, scRate, scAmount,
-                grand_total, grand_total, finalCashReceived, changeAmount, req.user.id
+                grand_total, grand_total, finalCashReceived, changeAmount, req.user.id, req.shopId
             ]
         );
-
         const invoiceId = invoiceResult.insertId;
 
         let hasRestrictedItem = false;
@@ -1094,9 +1250,9 @@ exports.createQuickSale = async (req, res) => {
         // 5. Insert Items
         for (const item of processedItems) {
             const [itemResult] = await connection.query(
-                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note, age_confirmed, no_receipt_item)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note, item.age_confirmed, item.no_receipt_item ? 1 : 0]
+                `INSERT INTO invoice_items (invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, special_note, age_confirmed, no_receipt_item, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.special_note, item.age_confirmed, item.no_receipt_item ? 1 : 0, req.shopId]
             );
             if (item.age_confirmed) hasRestrictedItem = true;
         }
@@ -1147,7 +1303,7 @@ exports.createQuickRetailSale = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const [settingsRows] = await connection.query('SELECT setting_key, setting_value FROM settings');
+        const [settingsRows] = await connection.query('SELECT setting_key, setting_value FROM settings WHERE shop_id = ?', [req.shopId]);
         const settings = {};
         settingsRows.forEach(row => settings[row.setting_key] = row.setting_value);
 
@@ -1155,14 +1311,14 @@ exports.createQuickRetailSale = async (req, res) => {
              throw new Error('Quick Retail is currently disabled in system settings.');
         }
 
-        const invoice_no = await generateInvoiceNo(connection);
+        const invoice_no = generateInvoiceNo(); // Fix: Was generateInvoiceNo(connection) but it takes no args
         let subtotal = 0;
         const processedItems = [];
 
         for (const itemInput of items) {
             const [itemData] = await connection.query(
-                'SELECT id, name, price, status, availability_status, item_type, age_restricted, requires_age_confirmation, track_stock, stock_qty, no_receipt_default, send_to_kitchen FROM items WHERE id = ?', 
-                [itemInput.item_id]
+                'SELECT id, name, price, status, availability_status, item_type, age_restricted, requires_age_confirmation, track_stock, stock_qty, no_receipt_default, send_to_kitchen FROM items WHERE id = ? AND shop_id = ?', 
+                [itemInput.item_id, req.shopId]
             );
             
             if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id} not found`);
@@ -1206,11 +1362,10 @@ exports.createQuickRetailSale = async (req, res) => {
             `INSERT INTO invoices (
                 invoice_no, invoice_type, payment_status, payment_method, 
                 subtotal, grand_total, paid_amount, cash_received, change_amount, 
-                balance_amount, created_by, sale_channel, no_receipt, receipt_printed, sale_type
-            ) VALUES (?, 'cash_sale', 'paid', 'cash', ?, ?, ?, ?, ?, 0, ?, 'quick_no_receipt', true, false, 'quick')`,
-            [invoice_no, subtotal, grand_total, grand_total, finalCashReceived, changeAmount, req.user.id]
+                balance_amount, created_by, sale_channel, no_receipt, receipt_printed, sale_type, shop_id
+            ) VALUES (?, 'cash_sale', 'paid', 'cash', ?, ?, ?, ?, ?, 0, ?, 'quick_no_receipt', true, false, 'quick', ?)`,
+            [invoice_no, subtotal, grand_total, grand_total, finalCashReceived, changeAmount, req.user.id, req.shopId]
         );
-
         const invoiceId = invoiceResult.insertId;
 
         // Insert Items and Update Stock
@@ -1218,16 +1373,16 @@ exports.createQuickRetailSale = async (req, res) => {
             await connection.query(
                 `INSERT INTO invoice_items (
                     invoice_id, item_id, item_name, qty, unit_price, total, 
-                    no_receipt_item, item_type, age_restricted, age_confirmed, send_to_kitchen
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    no_receipt_item, item_type, age_restricted, age_confirmed, send_to_kitchen, shop_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     invoiceId, item.id, item.name, item.qty, item.price, item.total, 
-                    1, item.item_type, item.age_restricted, item.age_confirmed, 0 
+                    1, item.item_type, item.age_restricted, item.age_confirmed, 0, req.shopId
                 ]
             );
 
             if (item.track_stock) {
-                await connection.query('UPDATE items SET stock_qty = stock_qty - ? WHERE id = ?', [item.qty, item.id]);
+                await connection.query('UPDATE items SET stock_qty = stock_qty - ? WHERE id = ? AND shop_id = ?', [item.qty, item.id, req.shopId]);
             }
         }
 

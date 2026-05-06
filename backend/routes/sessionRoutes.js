@@ -20,4 +20,5 @@ const { splitBill } = require('../controllers/invoiceController');
 router.post('/:id/split-bill', splitBill);
 router.post('/:id/transfer', sessionController.transferTable);
 router.post('/:id/merge', sessionController.mergeTable);
+router.delete('/:id', sessionController.cancelSession);
 module.exports = router;

@@ -142,67 +142,85 @@ const KitchenDisplay = () => {
     
     return (
       <div key={kot.uuid || kot.id} className={cn(
-        "bg-white rounded-3xl border-2 shadow-sm transition-all duration-300 flex flex-col overflow-hidden animate-in zoom-in-95 duration-300",
-        kot.status === 'pending' ? "border-amber-100" :
-        kot.status === 'preparing' ? "border-indigo-100" :
-        kot.status === 'ready' ? "border-emerald-100" : "border-slate-100"
+        "bg-white rounded-[2rem] border-2 shadow-xl shadow-slate-200/40 transition-all duration-300 flex flex-col overflow-hidden animate-in zoom-in-95",
+        kot.status === 'pending' ? "border-amber-100 ring-4 ring-amber-50/50" :
+        kot.status === 'preparing' ? "border-indigo-100 ring-4 ring-indigo-50/50" :
+        kot.status === 'ready' ? "border-emerald-100 ring-4 ring-emerald-50/50" : "border-slate-100"
       )}>
         {/* Card Header */}
         <header className={cn(
-          "px-4 py-3 flex justify-between items-start border-b",
-          kot.status === 'pending' ? "bg-amber-50/30" :
-          kot.status === 'preparing' ? "bg-indigo-50/30" :
-          kot.status === 'ready' ? "bg-emerald-50/30" : "bg-slate-50/30"
+          "px-5 py-4 flex justify-between items-start",
+          kot.status === 'pending' ? "bg-gradient-to-br from-amber-50 to-white" :
+          kot.status === 'preparing' ? "bg-gradient-to-br from-indigo-50 to-white" :
+          kot.status === 'ready' ? "bg-gradient-to-br from-emerald-50 to-white" : "bg-slate-50/50"
         )}>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-               <h4 className="font-black text-sm text-slate-900 tracking-tight">#{kot.kot_no}</h4>
-               {kot.order_type === 'takeaway' ? <ShoppingBag size={12} className="text-orange-500" /> : 
-                kot.order_type === 'delivery' ? <Truck size={12} className="text-blue-500" /> : 
-                <UtensilsCrossed size={12} className="text-indigo-500" />}
+               <span className={cn(
+                 "w-2 h-2 rounded-full animate-pulse",
+                 kot.status === 'pending' ? "bg-amber-500" :
+                 kot.status === 'preparing' ? "bg-indigo-500" : "bg-emerald-500"
+               )}></span>
+               <h4 className="font-black text-base text-slate-900 tracking-tight">#{kot.kot_no}</h4>
+               {kot.order_type === 'takeaway' ? <Badge variant="warning" className="text-[8px] px-1.5 py-0">TAK</Badge> : 
+                kot.order_type === 'delivery' ? <Badge variant="primary" className="text-[8px] px-1.5 py-0">DEL</Badge> : 
+                <Badge variant="secondary" className="text-[8px] px-1.5 py-0">DINE</Badge>}
             </div>
             <div className="flex flex-col">
-               <span className="text-[10px] font-black uppercase text-slate-900">
+               <span className="text-[11px] font-black uppercase text-slate-900 flex items-center gap-1">
                   {kot.order_type === 'dine_in' ? `Table ${kot.table_no || '?'}` : kot.order_type.toUpperCase()}
                </span>
-               <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                  <User size={8} /> {kot.created_by_name}
+               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 mt-0.5">
+                  <User size={10} className="opacity-50" /> {kot.created_by_name}
                </span>
             </div>
           </div>
-          <div className={cn("px-3 py-1.5 rounded-2xl border flex flex-col items-center min-w-[60px]", timeStyles)}>
-             <span className="text-sm font-black tracking-tighter leading-none">{elapsed}m</span>
-             <span className="text-[7px] font-black uppercase tracking-widest mt-1">TIME</span>
+          <div className={cn("px-3 py-2 rounded-2xl border-2 flex flex-col items-center min-w-[65px] shadow-sm transition-colors", timeStyles)}>
+             <span className="text-base font-black tracking-tighter leading-none">{elapsed}m</span>
+             <span className="text-[8px] font-black uppercase tracking-[0.2em] mt-1 opacity-70">TIMER</span>
           </div>
         </header>
 
         {/* Card Body */}
-        <div className="p-4 flex-1 space-y-3">
-          <div className="space-y-2.5">
+        <div className="p-5 flex-1 space-y-4">
+          <div className="space-y-3.5">
             {kot.items.map((item, idx) => (
-              <div key={idx} className="flex gap-3 group">
-                <div className="w-8 h-8 rounded-xl bg-slate-900 flex items-center justify-center text-white font-black shrink-0 text-xs shadow-sm">
+              <div key={idx} className="flex gap-4 group">
+                <div className="w-9 h-9 rounded-[14px] bg-slate-900 flex items-center justify-center text-white font-black shrink-0 text-xs shadow-lg shadow-slate-200">
                   {item.qty}
                 </div>
                 <div className="flex-1 min-w-0">
-                   <p className="font-black text-slate-900 text-[11px] leading-tight mb-1 uppercase tracking-tight truncate">{item.item_name}</p>
+                   <p className="font-black text-slate-900 text-sm leading-tight mb-1.5 uppercase tracking-tight truncate">{item.item_name}</p>
                    
                    {/* Modifiers & Notes */}
                    {(item.modifier_names || item.special_note || item.note) && (
-                     <div className="bg-slate-50 rounded-xl p-2 border border-slate-100 space-y-1">
+                     <div className="bg-slate-50/50 rounded-2xl p-2.5 border border-slate-100 space-y-2 shadow-inner">
                         {item.modifier_names && (
-                           <div className="flex flex-wrap gap-1">
-                              {item.modifier_names.split(',').map((mod, i) => (
-                                 <span key={i} className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-white text-indigo-600 rounded-md border border-indigo-100">
-                                    + {mod.trim()}
-                                 </span>
-                              ))}
+                           <div className="flex flex-wrap gap-1.5">
+                              {item.modifier_names.split(',').map((mod, i) => {
+                                 const modLower = mod.toLowerCase().trim();
+                                 const isRemoval = modLower.startsWith('no ') || modLower.includes('without') || modLower.includes('- ');
+                                 return (
+                                    <span key={i} className={cn(
+                                       "text-[9px] font-black uppercase px-2 py-1 rounded-xl border flex items-center gap-1 shadow-sm transition-all",
+                                       isRemoval 
+                                          ? "bg-rose-50 text-rose-600 border-rose-200" 
+                                          : "bg-indigo-50 text-indigo-600 border-indigo-200"
+                                    )}>
+                                       {isRemoval ? <X size={10} strokeWidth={3} /> : <Plus size={10} strokeWidth={3} />}
+                                       {mod.trim().replace(/^[-+]\s*/, '')}
+                                    </span>
+                                 );
+                              })}
                            </div>
                         )}
                         {(item.special_note || item.note) && (
-                           <p className="text-[9px] font-bold text-rose-500 italic leading-tight flex items-center gap-1">
-                              <AlertCircle size={8} /> {item.special_note || item.note}
-                           </p>
+                           <div className="flex items-start gap-1.5 bg-white p-2 rounded-xl border border-slate-100">
+                              <AlertCircle size={12} className="text-rose-500 shrink-0 mt-0.5" />
+                              <p className="text-[10px] font-bold text-rose-600 italic leading-snug">
+                                 {item.special_note || item.note}
+                              </p>
+                           </div>
                         )}
                      </div>
                    )}
@@ -212,58 +230,61 @@ const KitchenDisplay = () => {
           </div>
 
           {kot.note && (
-            <div className="mt-2 p-2 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
-              <p className="text-[8px] font-black uppercase tracking-widest text-indigo-400 mb-0.5">Order Note</p>
-              <p className="text-[9px] font-bold text-indigo-900 italic line-clamp-2">"{kot.note}"</p>
+            <div className="mt-4 p-3 bg-indigo-50/40 rounded-2xl border border-indigo-100/50 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                <MessageSquare size={16} />
+              </div>
+              <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-1">Kitchen Instruction</p>
+              <p className="text-xs font-bold text-indigo-900 italic leading-relaxed">"{kot.note}"</p>
             </div>
           )}
         </div>
 
         {/* Action Footer */}
-        <footer className="p-3 bg-slate-50/50 border-t border-slate-100 flex gap-2">
+        <footer className="p-4 bg-slate-50/30 border-t border-slate-100 flex gap-3">
            {kot.status === 'pending' && (
              <AppButton 
                variant="primary" 
                block 
-               size="sm" 
+               size="lg" 
                icon={Play} 
                onClick={() => handleStatusUpdate(kot.uuid || kot.id, 'preparing')}
-               className="rounded-xl uppercase text-[10px] tracking-widest font-black h-10"
+               className="rounded-2xl uppercase text-[11px] tracking-widest font-black h-12 shadow-lg shadow-indigo-100"
              >
-               Start
+               Start Prep
              </AppButton>
            )}
            {kot.status === 'preparing' && (
              <AppButton 
                variant="success" 
                block 
-               size="sm" 
+               size="lg" 
                icon={Check} 
                onClick={() => handleStatusUpdate(kot.uuid || kot.id, 'ready')}
-               className="rounded-xl uppercase text-[10px] tracking-widest font-black h-10"
+               className="rounded-2xl uppercase text-[11px] tracking-widest font-black h-12 shadow-lg shadow-emerald-100"
              >
-               Ready
+               Mark Ready
              </AppButton>
            )}
            {kot.status === 'ready' && (
              <AppButton 
                variant="dark" 
                block 
-               size="sm" 
+               size="lg" 
                icon={CheckCircle2} 
                onClick={() => handleStatusUpdate(kot.uuid || kot.id, 'served')}
-               className="rounded-xl uppercase text-[10px] tracking-widest font-black h-10"
+               className="rounded-2xl uppercase text-[11px] tracking-widest font-black h-12 shadow-lg shadow-slate-200"
              >
-               Serve
+               Served
              </AppButton>
            )}
            {kot.status !== 'served' && kot.status !== 'cancelled' && (
              <button 
                onClick={() => setCancelModal({ show: true, kotId: kot.uuid || kot.id, reason: '' })}
-               className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-rose-500 hover:border-rose-200 transition-all flex items-center justify-center shrink-0"
+               className="w-12 h-12 rounded-2xl bg-white border-2 border-slate-100 text-slate-300 hover:text-rose-500 hover:border-rose-200 hover:shadow-lg hover:shadow-rose-100 transition-all flex items-center justify-center shrink-0"
                title="Cancel KOT"
              >
-               <XCircle size={18} />
+               <XCircle size={22} />
              </button>
            )}
         </footer>

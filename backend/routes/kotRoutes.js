@@ -10,5 +10,6 @@ router.get('/', kotController.getKOTs);
 router.get('/:id', kotController.getKOTDetails);
 router.get('/session/:sessionId', kotController.getKOTsBySession);
 router.post('/create', kotController.createKOT); // Legacy support
+router.post('/invoice/:invoiceId/send-kot', kotController.createKOTFromInvoice);
 
 module.exports = router;

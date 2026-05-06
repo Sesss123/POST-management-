@@ -4,12 +4,14 @@ import { AppModal, AppButton } from '../ui';
 import A4InvoiceTemplate from './A4InvoiceTemplate';
 import ThermalReceiptTemplate from './ThermalReceiptTemplate';
 import { cn } from '../../utils/cn';
-import { invoiceApi } from '../../api/api';
+import { invoiceApi, kotApi } from '../../api/api';
 import { useToast } from '../ui';
+import { Utensils } from 'lucide-react';
 
 const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = true }) => {
   const [printMode, setPrintMode] = useState('thermal'); // 'thermal' or 'a4'
   const [voiding, setVoiding] = useState(false);
+  const [sendingKOT, setSendingKOT] = useState(false);
   const toast = useToast();
 
   React.useEffect(() => {
@@ -42,6 +44,20 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
         toast.error(err.response?.data?.message || 'Failed to void invoice');
     } finally {
         setVoiding(false);
+    }
+  };
+
+  const handleSendKOT = async () => {
+    try {
+        setSendingKOT(true);
+        const { data } = await kotApi.createFromInvoice(invoice.uuid || invoice.id);
+        if (data.success) {
+            toast.success('KOT sent to kitchen successfully!');
+        }
+    } catch (err) {
+        toast.error(err.response?.data?.message || 'Failed to send KOT. Maybe no kitchen items in this bill?');
+    } finally {
+        setSendingKOT(false);
     }
   };
 
@@ -80,7 +96,7 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
                 <AppButton 
                     variant="warning"
                     onClick={handleVoidAndEdit}
-                    disabled={voiding}
+                    disabled={voiding || sendingKOT}
                     size="sm"
                     className="flex-1 sm:flex-none h-10 px-4 rounded-xl text-[10px]"
                     icon={RotateCcw}
@@ -88,12 +104,23 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
                     {voiding ? 'WAIT...' : 'EDIT'}
                 </AppButton>
                 <AppButton 
+                    variant="primary"
+                    onClick={handleSendKOT}
+                    loading={sendingKOT}
+                    disabled={voiding}
+                    size="sm"
+                    className="flex-1 sm:flex-none h-10 px-4 rounded-xl text-[10px] bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100"
+                    icon={Utensils}
+                >
+                    SEND KOT
+                </AppButton>
+                <AppButton 
                     variant="success" 
                     size="sm"
                     className="flex-1 sm:flex-none h-10 px-6 rounded-xl text-[10px] shadow-emerald-100" 
                     icon={Printer} 
                     onClick={handlePrint}
-                    disabled={voiding}
+                    disabled={voiding || sendingKOT}
                 >
                     PRINT
                 </AppButton>
