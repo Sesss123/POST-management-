@@ -23,7 +23,7 @@ exports.createQRRequest = async (req, res) => {
 
         await connection.beginTransaction();
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
         
         let subtotal = 0;
@@ -32,8 +32,8 @@ exports.createQRRequest = async (req, res) => {
         // 1. Calculate subtotal (similar to invoiceController logic)
         for (const itemInput of items) {
             const [itemData] = await connection.query(
-                'SELECT id, name, price, status, availability_status, track_stock, stock_qty, no_receipt_default FROM items WHERE id = ?', 
-                [itemInput.item_id || itemInput.id]
+                'SELECT id, name, price, status, availability_status, track_stock, stock_qty, no_receipt_default FROM items WHERE id = ? AND shop_id = ?', 
+                [itemInput.item_id || itemInput.id, req.shopId]
             );
             
             if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id || itemInput.id} not found`);
@@ -87,14 +87,14 @@ exports.createQRRequest = async (req, res) => {
                 promotion_id, promotion_discount_amount,
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, balance_amount, created_by,
-                sale_channel, no_receipt, sale_type
-            ) VALUES (?, ?, ?, ?, 'cash_sale', ?, ?, 'pending', 'qr', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'normal', false, 'restaurant')`,
+                sale_channel, no_receipt, sale_type, shop_id
+            ) VALUES (?, ?, ?, ?, 'cash_sale', ?, ?, 'pending', 'qr', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'normal', false, 'restaurant', ?)`,
             [
                 invoiceUuid, invoice_no, customer_id || null, session_id || null, order_type, waiter_id || req.user.id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 promotion_id || null, promotion_discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grand_total, grand_total, req.user.id
+                grand_total, grand_total, req.user.id, req.shopId
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -102,9 +102,9 @@ exports.createQRRequest = async (req, res) => {
         // 4. Insert Invoice Items
         for (const item of processedItems) {
             await connection.query(
-                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total, no_receipt_item)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [generateUuid(), invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, item.no_receipt_item ? 1 : 0]
+                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total, no_receipt_item, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [generateUuid(), invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, item.no_receipt_item ? 1 : 0, req.shopId]
             );
         }
 
@@ -123,20 +123,20 @@ exports.createQRRequest = async (req, res) => {
         await connection.query(
             `INSERT INTO payment_transactions (
                 uuid, invoice_id, held_bill_id, session_id, provider, method, amount, currency, status, 
-                gateway_order_id, qr_payload, qr_image_url, expires_at, request_payload, created_by
-            ) VALUES (?, ?, ?, ?, ?, 'qr', ?, 'LKR', 'pending', ?, ?, ?, ?, ?, ?)`,
+                gateway_order_id, qr_payload, qr_image_url, expires_at, request_payload, created_by, shop_id
+            ) VALUES (?, ?, ?, ?, ?, 'qr', ?, 'LKR', 'pending', ?, ?, ?, ?, ?, ?, ?)`,
             [
                 transactionUuid, invoiceId, held_bill_id || null, session_id || null, providerName, grand_total, 
                 gatewayRequest.gateway_order_id, gatewayRequest.qr_payload, 
                 gatewayRequest.qr_image_url, gatewayRequest.expires_at, 
-                JSON.stringify({ items: processedItems }), req.user.id
+                JSON.stringify({ items: processedItems }), req.user.id, req.shopId
             ]
         );
 
         // Update invoice with gateway info
         await connection.query(
-            `UPDATE invoices SET gateway_provider = ?, gateway_order_id = ?, qr_payment_status = 'pending' WHERE id = ?`,
-            [providerName, gatewayRequest.gateway_order_id, invoiceId]
+            `UPDATE invoices SET gateway_provider = ?, gateway_order_id = ? WHERE id = ? AND shop_id = ?`,
+            [providerName, gatewayRequest.gateway_order_id, invoiceId, req.shopId]
         );
 
         // 6. Special handling for Table Billing / Held Bills
@@ -190,8 +190,8 @@ exports.checkTransactionStatus = async (req, res) => {
 
     try {
         const [transactions] = await connection.query(
-            'SELECT * FROM payment_transactions WHERE uuid = ?',
-            [uuid]
+            'SELECT * FROM payment_transactions WHERE uuid = ? AND shop_id = ?',
+            [uuid, req.shopId]
         );
 
         if (transactions.length === 0) {
@@ -202,7 +202,7 @@ exports.checkTransactionStatus = async (req, res) => {
         
         // If already paid, return immediately (Idempotency Rule 4)
         if (transaction.status === 'paid') {
-            const [invoices] = await connection.query('SELECT payment_status FROM invoices WHERE id = ?', [transaction.invoice_id]);
+            const [invoices] = await connection.query('SELECT payment_status FROM invoices WHERE id = ? AND shop_id = ?', [transaction.invoice_id, req.shopId]);
             return res.json({
                 success: true,
                 data: {
@@ -223,12 +223,12 @@ exports.checkTransactionStatus = async (req, res) => {
             await finalizePayment(connection, transaction, gatewayStatus, req.user?.id);
         } else if (['failed', 'expired', 'cancelled'].includes(gatewayStatus.status)) {
             await connection.query(
-                'UPDATE payment_transactions SET status = ?, response_payload = ? WHERE id = ?',
-                [gatewayStatus.status, JSON.stringify(gatewayStatus.raw_response), transaction.id]
+                'UPDATE payment_transactions SET status = ?, response_payload = ? WHERE id = ? AND shop_id = ?',
+                [gatewayStatus.status, JSON.stringify(gatewayStatus.raw_response), transaction.id, req.shopId]
             );
             await connection.query(
-                'UPDATE invoices SET payment_status = ?, qr_payment_status = ? WHERE id = ?',
-                [gatewayStatus.status, gatewayStatus.status, transaction.invoice_id]
+                'UPDATE invoices SET payment_status = ?, qr_payment_status = ? WHERE id = ? AND shop_id = ?',
+                [gatewayStatus.status, gatewayStatus.status, transaction.invoice_id, req.shopId]
             );
         }
 
@@ -268,27 +268,29 @@ async function finalizePayment(connection, transaction, gatewayData, userId) {
                 gateway_reference = ?, 
                 paid_at = ?, 
                 response_payload = ? 
-             WHERE id = ?`,
+             WHERE id = ? AND shop_id = ?`,
             [
                 gatewayData.gateway_transaction_id, 
                 gatewayData.gateway_reference, 
                 gatewayData.paid_at || new Date(), 
                 JSON.stringify(gatewayData.raw_response), 
-                transaction.id
+                transaction.id,
+                transaction.shop_id
             ]
         );
         
         // 1.1 Record in invoice_payments for reporting (Shift/EOD)
         const payUuid = generateUuid();
         await connection.query(
-            `INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no)
-             VALUES (?, ?, ?, ?, ?)`,
+            `INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no, shop_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
                 payUuid, 
                 transaction.invoice_id, 
                 'qr', 
                 transaction.amount, 
-                transaction.gateway_reference || transaction.gateway_order_id
+                transaction.gateway_reference || transaction.gateway_order_id,
+                transaction.shop_id
             ]
         );
 
@@ -304,31 +306,31 @@ async function finalizePayment(connection, transaction, gatewayData, userId) {
                 gateway_transaction_id = ?,
                 gateway_reference = ?,
                 qr_payment_status = 'paid'
-             WHERE id = ?`,
-            [gatewayData.gateway_transaction_id, gatewayData.gateway_reference, transaction.invoice_id]
+             WHERE id = ? AND shop_id = ?`,
+            [gatewayData.gateway_transaction_id, gatewayData.gateway_reference, transaction.invoice_id, transaction.shop_id]
         );
 
         // 3. Deduct Stock (Rule: Only deduct when paid)
-        const [items] = await connection.query('SELECT item_id, qty FROM invoice_items WHERE invoice_id = ?', [transaction.invoice_id]);
-        await deductStock(connection, items);
+        const [items] = await connection.query('SELECT item_id, qty FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [transaction.invoice_id, transaction.shop_id]);
+        await deductStock(connection, items, transaction.invoice_id, transaction.shop_id, userId);
 
         // 4. If Table Session exists, close it
         if (invoice.session_id) {
             await connection.query(
-                'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?',
-                [userId || invoice.created_by, invoice.session_id]
+                'UPDATE table_sessions SET status = "paid", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?',
+                [userId || invoice.created_by, invoice.session_id, transaction.shop_id]
             );
             await connection.query(
-                'UPDATE restaurant_tables SET status = "available" WHERE id = (SELECT table_id FROM table_sessions WHERE id = ?)',
-                [invoice.session_id]
+                'UPDATE restaurant_tables SET status = "available" WHERE id = (SELECT table_id FROM table_sessions WHERE id = ? AND shop_id = ?) AND shop_id = ?',
+                [invoice.session_id, transaction.shop_id, transaction.shop_id]
             );
         }
 
         // 5. If Held Bill exists, complete it
         if (transaction.held_bill_id) {
             await connection.query(
-                "UPDATE held_bills SET status = 'completed', invoice_id = ?, completed_by = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [transaction.invoice_id, userId || invoice.created_by, transaction.held_bill_id]
+                "UPDATE held_bills SET status = 'completed', invoice_id = ?, completed_by = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ? AND shop_id = ?",
+                [transaction.invoice_id, userId || invoice.created_by, transaction.held_bill_id, transaction.shop_id]
             );
         }
         await logAction(userId || invoice.created_by, 'qr_payment_paid', 'invoice', transaction.invoice_id, null, { 
@@ -357,8 +359,8 @@ exports.mockMarkPaid = async (req, res) => {
 
     try {
         const [transactions] = await connection.query(
-            'SELECT * FROM payment_transactions WHERE uuid = ?',
-            [uuid]
+            'SELECT * FROM payment_transactions WHERE uuid = ? AND shop_id = ?',
+            [uuid, req.shopId]
         );
 
         if (transactions.length === 0) {
@@ -396,8 +398,8 @@ exports.cancelTransaction = async (req, res) => {
 
     try {
         const [transactions] = await connection.query(
-            'SELECT * FROM payment_transactions WHERE uuid = ?',
-            [uuid]
+            'SELECT * FROM payment_transactions WHERE uuid = ? AND shop_id = ?',
+            [uuid, req.shopId]
         );
 
         if (transactions.length === 0) return res.status(404).json({ success: false, message: 'Transaction not found' });
@@ -407,8 +409,8 @@ exports.cancelTransaction = async (req, res) => {
 
         await connection.beginTransaction();
 
-        await connection.query('UPDATE payment_transactions SET status = "cancelled" WHERE id = ?', [transaction.id]);
-        await connection.query('UPDATE invoices SET payment_status = "cancelled", qr_payment_status = "cancelled" WHERE id = ?', [transaction.invoice_id]);
+        await connection.query('UPDATE payment_transactions SET status = "cancelled" WHERE id = ? AND shop_id = ?', [transaction.id, req.shopId]);
+        await connection.query('UPDATE invoices SET payment_status = "cancelled", qr_payment_status = "cancelled" WHERE id = ? AND shop_id = ?', [transaction.invoice_id, req.shopId]);
 
         await logAction(req.user.id, 'qr_payment_cancelled', 'invoice', transaction.invoice_id, null, { 
             gateway_order_id: transaction.gateway_order_id 
@@ -458,8 +460,8 @@ exports.handleGenieWebhook = async (req, res) => {
         } else {
             // Handle failure/cancel based on Genie status codes
             await connection.query(
-                'UPDATE payment_transactions SET status = "failed", callback_payload = ? WHERE id = ?',
-                [JSON.stringify(req.body), transaction.id]
+                'UPDATE payment_transactions SET status = "failed", callback_payload = ? WHERE id = ? AND shop_id = ?',
+                [JSON.stringify(req.body), transaction.id, transaction.shop_id]
             );
         }
 

@@ -1,5 +1,6 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
+const { encrypt, decrypt } = require('../utils/cryptoVault');
 const supplierAccountService = require('../services/supplierAccountService');
 
 // @desc    Get all suppliers
@@ -24,7 +25,14 @@ exports.getSuppliers = async (req, res) => {
         query += ' ORDER BY name ASC';
         
         const [suppliers] = await db.query(query, params);
-        res.json({ success: true, data: suppliers });
+        
+        // Decrypt sensitive fields
+        const decryptedSuppliers = suppliers.map(s => ({
+            ...s,
+            bank_account: s.bank_account ? decrypt(s.bank_account) : null
+        }));
+        
+        res.json({ success: true, data: decryptedSuppliers });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -35,7 +43,7 @@ exports.getSuppliers = async (req, res) => {
 // @route   POST /api/suppliers
 // @access  Private/Admin/Manager
 exports.createSupplier = async (req, res) => {
-    const { name, phone, address, email, contact_person, opening_balance, notes } = req.body;
+    const { name, phone, address, email, bank_account, contact_person, opening_balance, notes } = req.body;
     const connection = await db.getConnection();
 
     try {
@@ -44,9 +52,9 @@ exports.createSupplier = async (req, res) => {
         const openBalance = parseFloat(opening_balance || 0);
         
         const [result] = await connection.query(
-            `INSERT INTO suppliers (name, phone, address, email, contact_person, opening_balance, current_balance, notes, created_by, shop_id) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [name, phone, address, email, contact_person, openBalance, openBalance, notes, req.user.id, req.shopId]
+            `INSERT INTO suppliers (name, phone, address, email, bank_account, contact_person, opening_balance, current_balance, notes, created_by, shop_id) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [name, phone, address, email, bank_account ? encrypt(bank_account) : null, contact_person, openBalance, openBalance, notes, req.user.id, req.shopId]
         );
         
         const supplierId = result.insertId;
@@ -81,7 +89,10 @@ exports.getSupplierAccount = async (req, res) => {
         
         const [suppliers] = await db.query('SELECT * FROM suppliers WHERE id = ? AND shop_id = ?', [supplierId, req.shopId]);
         if (suppliers.length === 0) return res.status(404).json({ success: false, message: 'Supplier not found' });
-        const supplier = suppliers[0];
+        const supplier = {
+            ...suppliers[0],
+            bank_account: suppliers[0].bank_account ? decrypt(suppliers[0].bank_account) : null
+        };
 
         // Get Summary
         const [unpaidSummary] = await db.query(
@@ -159,6 +170,36 @@ exports.recordPayment = async (req, res) => {
         res.status(500).json({ success: false, message: error.message || 'Failed to record payment' });
     } finally {
         connection.release();
+    }
+};
+
+// @desc    Update supplier
+// @route   PUT /api/suppliers/:id
+// @access  Private/Admin/Manager
+exports.updateSupplier = async (req, res) => {
+    const { name, phone, address, email, bank_account, contact_person, status, notes } = req.body;
+    try {
+        const [oldSupplier] = await db.query('SELECT * FROM suppliers WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
+        if (oldSupplier.length === 0) return res.status(404).json({ success: false, message: 'Supplier not found' });
+
+        await db.query(
+            `UPDATE suppliers SET 
+                name = ?, phone = ?, address = ?, email = ?, bank_account = ?, 
+                contact_person = ?, status = ?, notes = ? 
+             WHERE id = ? AND shop_id = ?`,
+            [
+                name, phone, address, email, 
+                bank_account ? encrypt(bank_account) : oldSupplier[0].bank_account, 
+                contact_person, status || oldSupplier[0].status, notes, 
+                req.params.id, req.shopId
+            ]
+        );
+
+        await logAction(req.user.id, 'supplier_updated', 'supplier', req.params.id, oldSupplier[0], req.body);
+        res.json({ success: true, message: 'Supplier updated successfully' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 

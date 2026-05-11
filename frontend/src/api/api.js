@@ -3,15 +3,15 @@ import apiClient from './apiClient';
 export const invoiceApi = {
     getAll: () => apiClient.get('/invoices'),
     getDetails: (id) => apiClient.get(`/invoices/${id}`),
-    createCashSale: (data) => apiClient.post('/invoices/cash-sale', data),
-    createCashSaleCredit: (data) => apiClient.post('/invoices/cash-sale/add-to-credit', data),
-    createQuickSale: (data) => apiClient.post('/invoices/quick-sale', data),
-    createTablePayNow: (data) => apiClient.post('/invoices/table-sale/pay-now', data),
-    createTableCredit: (data) => apiClient.post('/invoices/table-sale/add-to-credit', data),
-    createTableSplit: (data) => apiClient.post('/invoices/table-sale/split', data),
+    createCashSale: (data) => apiClient.post('/invoices/cash-sale', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    createCashSaleCredit: (data) => apiClient.post('/invoices/cash-sale/add-to-credit', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    createQuickSale: (data) => apiClient.post('/invoices/quick-sale', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    createTablePayNow: (data) => apiClient.post('/invoices/table-sale/pay-now', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    createTableCredit: (data) => apiClient.post('/invoices/table-sale/add-to-credit', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    createTableSplit: (data) => apiClient.post('/invoices/table-sale/split', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
     cancel: (id, reason) => apiClient.patch(`/invoices/${id}/cancel`, { reason }),
     voidInvoice: (id) => apiClient.delete(`/invoices/${id}/void`),
-    createQuickRetailSale: (data) => apiClient.post('/invoices/quick-retail-sale', data)
+    createQuickRetailSale: (data) => apiClient.post('/invoices/quick-retail-sale', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } })
 };
 
 export const quickRetailApi = {
@@ -79,10 +79,10 @@ export const sessionApi = {
     voidItem: (id, data) => apiClient.patch(`/table-sessions/${id}/void-item`, data),
     getDetails: (id) => apiClient.get(`/table-sessions/${id}`),
     getActiveByTable: (tableId) => apiClient.get(`/table-sessions/table/${tableId}`),
-    sendKOT: (id, data) => apiClient.post(`/table-sessions/${id}/send-kot`, data),
-    payNow: (id, payload) => apiClient.post(`/table-sessions/${id}/final-bill/pay-now`, payload),
-    addToCredit: (id, payload) => apiClient.post(`/table-sessions/${id}/final-bill/add-to-credit`, payload),
-    splitBill: (id, payload) => apiClient.post(`/table-sessions/${id}/split-bill`, payload),
+    sendKOT: (id, data) => apiClient.post(`/table-sessions/${id}/send-kot`, data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    payNow: (id, payload) => apiClient.post(`/table-sessions/${id}/final-bill/pay-now`, payload, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    addToCredit: (id, payload) => apiClient.post(`/table-sessions/${id}/final-bill/add-to-credit`, payload, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    splitBill: (id, payload) => apiClient.post(`/table-sessions/${id}/split-bill`, payload, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
     transferTable: (id, payload) => apiClient.post(`/table-sessions/${id}/transfer`, payload),
     mergeTable: (id, payload) => apiClient.post(`/table-sessions/${id}/merge`, payload),
     cancel: (id) => apiClient.delete(`/table-sessions/${id}`)
@@ -218,6 +218,7 @@ export const superAdminApi = {
     getHealth: () => apiClient.get('/super-admin/health'),
     getSystemHealth: () => apiClient.get('/super-admin/system-health'),
     getAuditLogs: (params) => apiClient.get('/super-admin/audit-logs', { params }),
+    getSecurityMetrics: () => apiClient.get('/super-admin/security'),
     
     // Shops
     getShops: () => apiClient.get('/super-admin/shops'),
@@ -238,5 +239,19 @@ export const superAdminApi = {
     
     // Tickets
     getTickets: () => apiClient.get('/super-admin/tickets'),
-    updateTicket: (id, data) => apiClient.put(`/super-admin/tickets/${id}`, data)
+    updateTicket: (id, data) => apiClient.put(`/super-admin/tickets/${id}`, data),
+
+    // Backups
+    getBackups: () => apiClient.get('/super-admin/backups'),
+    runBackup: () => apiClient.post('/super-admin/backups/run'),
+
+    // Platform Settings
+    getPlatformSettings: () => apiClient.get('/super-admin/platform-settings'),
+    updatePlatformSettings: (data) => apiClient.put('/super-admin/platform-settings', data),
+
+    // Platform Users
+    getPlatformUsers: () => apiClient.get('/super-admin/users'),
+    createPlatformUser: (data) => apiClient.post('/super-admin/users', data),
+    updateUserStatus: (id, status) => apiClient.patch(`/super-admin/users/${id}/status`, { status }),
+    resetUserPassword: (id, password) => apiClient.post(`/super-admin/users/${id}/reset-password`, { password })
 };

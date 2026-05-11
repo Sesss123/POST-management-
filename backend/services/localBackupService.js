@@ -1,8 +1,11 @@
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
+const crypto = require('crypto');
 const { db } = require('../config/db');
 const { generateUuid } = require('../utils/identifier');
+const { pipeline } = require('stream/promises');
 
 class LocalBackupService {
     /**
@@ -12,6 +15,11 @@ class LocalBackupService {
         const [settings] = await db.query('SELECT * FROM platform_settings WHERE setting_key LIKE "backup_%" OR setting_key = "mysqldump_path"');
         const config = {};
         settings.forEach(s => config[s.setting_key] = s.setting_value);
+        
+        // Fallback to env if not in platform_settings
+        config.backup_encryption_enabled = config.backup_encryption_enabled || process.env.BACKUP_ENCRYPTION_ENABLED || 'false';
+        config.backup_encryption_password = config.backup_encryption_password || process.env.BACKUP_ENCRYPTION_PASSWORD;
+        
         return config;
     }
 
@@ -61,22 +69,79 @@ class LocalBackupService {
                 let status = 'success';
                 let errorMessage = null;
                 let sizeMb = 0;
+                let isEncrypted = 0;
+                let encryptionMethod = null;
 
                 if (error) {
                     status = 'failed';
-                    errorMessage = stderr || error.message;
+                    let rawError = stderr || error.message || 'Unknown error';
+                    errorMessage = rawError.replace(/-p"[^"]*"/g, '-p"***"').replace(/-p\S+/g, '-p***');
                     console.error('Backup Error:', errorMessage);
                 } else if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
                     status = 'failed';
                     errorMessage = 'Backup file is empty or was not created.';
                     console.error('Backup Error:', errorMessage);
                 } else {
-                    const stats = fs.statSync(filePath);
-                    sizeMb = (stats.size / (1024 * 1024)).toFixed(2);
-                    console.log(`Backup completed successfully: ${fileName} (${sizeMb} MB)`);
+                    try {
+                        // 1. Post-process: Gzip and Encrypt
+                        const gzPath = `${filePath}.gz`;
+                        const encPath = `${gzPath}.enc`;
+                        const encryptionEnabled = config.backup_encryption_enabled === 'true';
+                        const encryptionPassword = config.backup_encryption_password;
+
+                        if (encryptionEnabled && !encryptionPassword) {
+                            console.warn('Backup Encryption enabled but no password set. Skipping encryption.');
+                        }
+
+                        // Pipe: Read SQL -> Gzip -> (optional) Encrypt -> Write
+                        const source = fs.createReadStream(filePath);
+                        const gzip = zlib.createGzip();
+                        
+                        if (encryptionEnabled && encryptionPassword) {
+                            // AES-256-CBC for backup files (standard for large files)
+                            const key = crypto.scryptSync(encryptionPassword, 'salt', 32);
+                            const iv = crypto.randomBytes(16);
+                            const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+                            
+                            const dest = fs.createWriteStream(encPath);
+                            dest.write(iv); // Prefix with IV
+                            
+                            await pipeline(source, gzip, cipher, dest);
+                            
+                            fs.unlinkSync(filePath); // Delete raw SQL
+                            isEncrypted = 1;
+                            encryptionMethod = 'aes-256-cbc';
+                            console.log(`Backup encrypted successfully: ${fileName}.gz.enc`);
+                        } else {
+                            const dest = fs.createWriteStream(gzPath);
+                            await pipeline(source, gzip, dest);
+                            fs.unlinkSync(filePath); // Delete raw SQL
+                        }
+
+                        const finalPath = isEncrypted ? encPath : gzPath;
+                        const finalName = path.basename(finalPath);
+                        const stats = fs.statSync(finalPath);
+                        sizeMb = (stats.size / (1024 * 1024)).toFixed(2);
+                        
+                        console.log(`Backup completed successfully: ${finalName} (${sizeMb} MB)`);
+
+                        // Log to database
+                        await db.query(
+                            `INSERT INTO backup_logs (uuid, backup_type, file_name, local_path, status, error_message, file_size_mb, is_encrypted, encryption_method, created_by)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            [logUuid, type, finalName, finalPath, 'success', null, sizeMb, isEncrypted, encryptionMethod, userId]
+                        );
+
+                        return resolve({ uuid: logUuid, fileName: finalName, filePath: finalPath, sizeMb, isEncrypted });
+
+                    } catch (procErr) {
+                        status = 'failed';
+                        errorMessage = `Post-processing failed: ${procErr.message}`;
+                        console.error('Backup Processing Error:', procErr);
+                    }
                 }
 
-                // Log to database
+                // Log failure to database
                 try {
                     await db.query(
                         `INSERT INTO backup_logs (uuid, backup_type, file_name, local_path, status, error_message, file_size_mb, created_by)
@@ -87,14 +152,7 @@ class LocalBackupService {
                     console.warn('Failed to save backup log to DB:', logErr.message);
                 }
 
-                // Cleanup old backups
-                await this.cleanupOldBackups(backupDir, retentionDays);
-
-                if (status === 'success') {
-                    resolve({ uuid: logUuid, fileName, filePath, sizeMb });
-                } else {
-                    reject(new Error(errorMessage));
-                }
+                reject(new Error(errorMessage));
             });
         });
     }
@@ -110,7 +168,7 @@ class LocalBackupService {
             const now = Date.now();
 
             files.forEach(file => {
-                if (file.endsWith('.sql') || file.endsWith('.gz')) {
+                if (file.endsWith('.sql') || file.endsWith('.gz') || file.endsWith('.enc')) {
                     const filePath = path.join(backupDir, file);
                     const stats = fs.statSync(filePath);
                     const ageDays = (now - stats.mtimeMs) / (1000 * 60 * 60 * 24);

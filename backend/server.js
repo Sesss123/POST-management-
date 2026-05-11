@@ -36,11 +36,32 @@ const { subscriptionMiddleware } = require('./middleware/subscriptionMiddleware'
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const { protect } = require('./middleware/authMiddleware');
 const idempotency = require('./middleware/idempotencyMiddleware');
+const { 
+    authLimiter, 
+    generalApiLimiter, 
+    publicMenuLimiter, 
+    paymentStatusLimiter, 
+    superAdminLimiter 
+} = require('./middleware/rateLimitMiddleware');
 
 dotenv.config();
 
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const logger = require('./utils/winstonLogger');
+
+// Global Crash Handlers (Fix 4 & 5)
+process.on('unhandledRejection', (err) => {
+    logger.error(`Unhandled Rejection: ${err.message}`, { stack: err.stack });
+    console.error('Unhandled Rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+    logger.error(`Uncaught Exception: ${err.message}`, { stack: err.stack });
+    console.error('Uncaught Exception:', err);
+    // Allow PM2 to restart the process
+    process.exit(1);
+});
 
 
 // Validate Environment Variables
@@ -48,41 +69,59 @@ validateEnv();
 
 connectDB();
 
+const securitySettingsService = require('./services/securitySettingsService');
+securitySettingsService.init();
+
 const app = express();
+app.set('trust proxy', 1);
+
+// Request Logger (Debug)
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path} [Origin: ${req.headers.origin}]`);
+    next();
+});
 
 // Security Middleware
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: false,
+}));
+// Enable CORS with specific origin for credentials support
+const allowedOrigins = [
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
+    'http://localhost:5000',
+    'http://127.0.0.1:5000'
+];
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    origin: function (origin, callback) {
+        // allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+        if (allowedOrigins.indexOf(origin) !== -1 || isLocalhost) {
+            return callback(null, true);
+        } else {
+            return callback(new Error('CORS blocked'), false);
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-shop-id']
 }));
 
-// Rate limiting
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // Limit each IP to 10 login attempts per 15 mins
-    message: { success: false, message: 'Too many login attempts, please try again later.' }
-});
+app.use(express.json({ limit: '1mb' }));
 
-const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 1000, // General limit: 1000 requests per 15 mins
-    message: { success: false, message: 'Too many requests from this IP, please try again later.' },
-    skip: (req) => req.path.startsWith('/api/kitchen') // Skip KDS polling from internal network if possible
-});
-
-const publicMenuLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 300, // 300 requests per 15 mins for public menu
-    message: { success: false, message: 'Public menu access limit reached. Please try again later.' }
-});
-
-app.use('/api/', apiLimiter);
+// Rate limiting implementation
 app.use('/api/auth/login', authLimiter);
 app.use('/api/public-menu', publicMenuLimiter);
-
-app.use(express.json({ limit: '1mb' }));
+app.use('/api/payments/transactions', paymentStatusLimiter);
+app.use('/api/super-admin', superAdminLimiter);
+app.use('/api/', generalApiLimiter);
 
 // Public/Auth Routes
 app.use('/api/auth', authRoutes);
@@ -137,7 +176,8 @@ app.use((err, req, res, next) => {
         success: false, 
         message: process.env.NODE_ENV === 'production' 
             ? 'An internal server error occurred.' 
-            : err.message || 'Something went wrong!' 
+            : err.message || 'Something went wrong!',
+        stack: err.stack
     });
 });
 
@@ -145,6 +185,8 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    // Start automated backups
+    // Start automated tasks
     backupScheduler.start();
+    const subscriptionReminderService = require('./services/subscriptionReminderService');
+    subscriptionReminderService.start();
 });

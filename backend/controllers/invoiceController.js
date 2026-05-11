@@ -79,19 +79,22 @@ const deductStock = async (connection, items, invoiceId, shopId, userId) => {
         for (const comp of componentList) {
             // 1. Check if tracking is enabled
             const [itemRows] = await connection.query(
-                'SELECT track_stock, stock_qty, name FROM items WHERE id = ? AND shop_id = ?',
+                'SELECT track_stock, stock_qty, name FROM items WHERE id = ? AND shop_id = ? FOR UPDATE',
                 [comp.id, shopId]
             );
             
             if (itemRows.length > 0 && itemRows[0].track_stock) {
-                const currentStock = parseFloat(itemRows[0].stock_qty);
-                const newStock = currentStock - comp.qty;
-                
-                // 2. Update stock
-                await connection.query(
-                    'UPDATE items SET stock_qty = ? WHERE id = ? AND shop_id = ?',
-                    [newStock, comp.id, shopId]
+                // 2. Atomic update: ensure stock doesn't go below 0
+                const [updateResult] = await connection.query(
+                    'UPDATE items SET stock_qty = stock_qty - ? WHERE id = ? AND shop_id = ? AND track_stock = 1 AND stock_qty >= ?',
+                    [comp.qty, comp.id, shopId, comp.qty]
                 );
+
+                if (updateResult.affectedRows === 0) {
+                    throw new Error(`Insufficient stock for item: ${itemRows[0].name}. Available: ${itemRows[0].stock_qty}, Requested: ${comp.qty}`);
+                }
+
+                const newStock = parseFloat(itemRows[0].stock_qty) - comp.qty;
 
                 // 3. Record movement
                 await connection.query(
@@ -363,11 +366,11 @@ exports.createCashSale = async (req, res) => {
              FROM invoices i
              LEFT JOIN customers c ON i.customer_id = c.id
              LEFT JOIN users u ON i.created_by = u.id
-             WHERE i.id = ?`,
-            [invoiceId]
+             WHERE i.id = ? AND i.shop_id = ?`,
+            [invoiceId, req.shopId]
         );
         const fullInvoice = fullInvoices[0];
-        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
+        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
         fullInvoice.items = invoiceItems;
 
         // Get settings too
@@ -760,7 +763,7 @@ exports.splitBill = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
 
         // 1. Get Session
@@ -810,7 +813,8 @@ exports.splitBill = async (req, res) => {
         if (isCredit) {
             await nayaService.validateCreditLimit(connection, {
                 customerId: final_customer_id,
-                amount: grand_total
+                amount: grand_total,
+                shopId: req.shopId
             });
         }
 
@@ -858,13 +862,13 @@ exports.splitBill = async (req, res) => {
         // 5.1 Record Promotion Usage
         if (promotion_id && promotion_discount_amount > 0) {
             await connection.query(
-                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount) VALUES (?, ?, ?)',
-                [promotion_id, invoiceId, promotion_discount_amount]
+                'INSERT INTO promotion_usage (promotion_id, invoice_id, discount_amount, shop_id) VALUES (?, ?, ?, ?)',
+                [promotion_id, invoiceId, promotion_discount_amount, req.shopId]
             );
         }
 
         // 5.2 Deduct Stock
-        await deductStock(connection, orderItems);
+        await deductStock(connection, orderItems, invoiceId, req.shopId, req.user.id);
 
         // 6. Naya Integration
         if (isCredit) {
@@ -1174,7 +1178,7 @@ exports.createQuickSale = async (req, res) => {
         }
         await connection.beginTransaction();
 
-        const settings = await getSystemSettings(connection);
+        const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
         
         let subtotal = 0;

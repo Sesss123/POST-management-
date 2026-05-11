@@ -4,7 +4,7 @@ import {
     Filter, RefreshCw, Eye, X, ChevronLeft, ChevronRight, 
     ShieldAlert, Globe, Monitor
 } from 'lucide-react';
-import apiClient from '../../api/apiClient';
+import { superAdminApi } from '../../api/api';
 import { useToast } from '../../components/ui/Feedback';
 import { cn } from '../../utils/cn';
 
@@ -47,11 +47,11 @@ const StatusBadge = ({ action }) => {
 
     return (
         <span className={cn(
-            "text-[10px] font-black uppercase tracking-tight px-2 py-1 rounded border",
-            isError ? "bg-rose-500/10 text-rose-400 border-rose-500/20" :
-            isDelete ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-            isCreate ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-            "bg-blue-500/10 text-blue-400 border-blue-500/20"
+            "text-[10px] font-black uppercase tracking-tight px-2 py-1 rounded border shadow-sm",
+            isError ? "bg-rose-500/20 text-rose-300 border-rose-500/40" :
+            isDelete ? "bg-amber-500/20 text-amber-300 border-amber-500/40" :
+            isCreate ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" :
+            "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
         )}>
             {action?.replace(/_/g, ' ')}
         </span>
@@ -79,7 +79,7 @@ export default function SuperAdminAuditLogsPage() {
                 date_from: filters.date_from,
                 date_to: filters.date_to
             };
-            const { data } = await apiClient.get('/super-admin/audit-logs', { params });
+            const { data } = await superAdminApi.getAuditLogs(params);
             if (data.success) {
                 setLogs(data.data.logs);
                 setPagination(data.data.pagination);
@@ -185,7 +185,7 @@ export default function SuperAdminAuditLogsPage() {
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="bg-white/[0.02] text-slate-500 text-[10px] uppercase font-black tracking-widest border-b border-white/5">
+                            <tr className="bg-white/[0.04] text-slate-300 text-[10px] uppercase font-black tracking-widest border-b border-white/10">
                                 <th className="px-8 py-5">Timestamp</th>
                                 <th className="px-8 py-5">Initiator</th>
                                 <th className="px-8 py-5">Action</th>
@@ -211,10 +211,10 @@ export default function SuperAdminAuditLogsPage() {
                                 </tr>
                             ) : (
                                 logs.map((log) => (
-                                    <tr key={log.id} className="group hover:bg-white/[0.02] transition-all">
+                                    <tr key={log.id} className="group hover:bg-white/[0.04] transition-all border-b border-white/[0.02] last:border-0">
                                         <td className="px-8 py-5">
-                                            <div className="text-xs font-mono text-slate-400 group-hover:text-white transition-colors">{fmtDate(log.created_at)}</div>
-                                            <div className="text-[10px] text-slate-600 mt-0.5 font-mono">{log.ip_address}</div>
+                                            <div className="text-xs font-mono text-slate-300 group-hover:text-white transition-colors">{fmtDate(log.created_at)}</div>
+                                            <div className="text-[10px] text-slate-500 mt-0.5 font-mono group-hover:text-slate-300 transition-colors">{log.ip_address}</div>
                                         </td>
                                         <td className="px-8 py-5">
                                             <div className="flex items-center gap-2.5">
@@ -222,21 +222,21 @@ export default function SuperAdminAuditLogsPage() {
                                                     {log.user_name?.charAt(0) || 'S'}
                                                 </div>
                                                 <div>
-                                                    <p className="text-sm font-bold text-white leading-none">{log.user_name || 'System'}</p>
-                                                    <p className="text-[10px] text-slate-500 mt-1">ID: {log.user_id || 'N/A'}</p>
+                                                    <p className="text-sm font-bold text-slate-100 group-hover:text-white leading-none">{log.user_name || 'System'}</p>
+                                                    <p className="text-[10px] text-slate-400 mt-1 font-medium italic">ID: {log.user_id || 'N/A'}</p>
                                                 </div>
                                             </div>
                                         </td>
                                         <td className="px-8 py-5">
                                             <StatusBadge action={log.action} />
-                                            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-tighter font-black opacity-50">
+                                            <p className="text-[10px] text-slate-400 mt-1.5 uppercase tracking-tighter font-black">
                                                 {log.entity_type} {log.entity_id ? `#${log.entity_id}` : ''}
                                             </p>
                                         </td>
                                         <td className="px-8 py-5">
-                                            <div className="flex items-center gap-2 text-sm text-slate-300">
-                                                <Store size={14} className="text-slate-600" />
-                                                <span className="font-medium">{log.shop_name || 'Platform'}</span>
+                                            <div className="flex items-center gap-2 text-sm text-slate-200">
+                                                <Store size={14} className="text-indigo-400/60" />
+                                                <span className="font-semibold">{log.shop_name || 'Platform'}</span>
                                             </div>
                                         </td>
                                         <td className="px-8 py-5 text-right">
@@ -286,18 +286,18 @@ export default function SuperAdminAuditLogsPage() {
             {/* Detail Modal */}
             {selectedLog && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                        <div className="flex items-center justify-between p-8 border-b border-white/5">
+                    <div className="bg-slate-900 border border-white/20 w-full max-w-3xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                        <div className="flex items-center justify-between p-8 border-b border-white/10 bg-white/[0.02]">
                             <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center">
-                                    <ClipboardList size={24} className="text-indigo-400" />
+                                <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 flex items-center justify-center border border-indigo-500/30">
+                                    <ClipboardList size={24} className="text-indigo-300" />
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-black text-white">Log Details</h3>
-                                    <p className="text-slate-500 text-xs mt-0.5">Entry ID: {selectedLog.id}</p>
+                                    <h3 className="text-xl font-black text-white">Audit Transaction Detail</h3>
+                                    <p className="text-slate-400 text-xs mt-0.5 font-mono">UUID: {selectedLog.id}</p>
                                 </div>
                             </div>
-                            <button onClick={() => setSelectedLog(null)} className="p-3 bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-2xl transition-all">
+                            <button onClick={() => setSelectedLog(null)} className="p-3 bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 rounded-2xl transition-all border border-white/5">
                                 <X size={20} />
                             </button>
                         </div>
@@ -305,24 +305,24 @@ export default function SuperAdminAuditLogsPage() {
                         <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
-                                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Timestamp</p>
-                                    <div className="flex items-center gap-2 text-slate-300 font-mono text-xs">
-                                        <Calendar size={14} className="text-slate-500" /> {fmtDate(selectedLog.created_at)}
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 opacity-70">Timestamp</p>
+                                    <div className="flex items-center gap-2 text-slate-200 font-mono text-xs">
+                                        <Calendar size={14} className="text-indigo-400" /> {fmtDate(selectedLog.created_at)}
                                     </div>
                                 </div>
                                 <div>
-                                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Action</p>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 opacity-70">Action</p>
                                     <StatusBadge action={selectedLog.action} />
                                 </div>
                                 <div>
-                                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">User IP Address</p>
-                                    <div className="flex items-center gap-2 text-slate-300 font-mono text-xs">
-                                        <Monitor size={14} className="text-slate-500" /> {selectedLog.ip_address}
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 opacity-70">User IP Address</p>
+                                    <div className="flex items-center gap-2 text-indigo-300 font-mono text-xs">
+                                        <Monitor size={14} className="text-indigo-400" /> {selectedLog.ip_address}
                                     </div>
                                 </div>
                                 <div>
-                                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Entity Target</p>
-                                    <div className="text-slate-300 text-sm font-bold capitalize">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 opacity-70">Entity Target</p>
+                                    <div className="text-white text-sm font-bold capitalize bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 inline-block">
                                         {selectedLog.entity_type} {selectedLog.entity_id ? `#${selectedLog.entity_id}` : '(None)'}
                                     </div>
                                 </div>
@@ -349,9 +349,9 @@ export default function SuperAdminAuditLogsPage() {
                             </div>
 
                             {selectedLog.user_agent && (
-                                <div className="pt-6 border-t border-white/5">
-                                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">User Agent / Device</p>
-                                    <p className="text-[11px] text-slate-500 font-mono leading-relaxed">{selectedLog.user_agent}</p>
+                                <div className="pt-6 border-t border-white/10">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">User Agent / Device Information</p>
+                                    <p className="text-[11px] text-slate-300 font-mono leading-relaxed bg-white/5 p-4 rounded-2xl border border-white/5 italic">{selectedLog.user_agent}</p>
                                 </div>
                             )}
                         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   Utensils, 
@@ -16,10 +16,14 @@ import { AppButton, FormInput } from '../components/ui';
 const LoginPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [show2FA, setShow2FA] = useState(false);
+  const [tempId, setTempId] = useState(null);
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   
-  const { login, user, loading: authLoading } = useAuth();
+  const { login, verify2FA, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -36,13 +40,40 @@ const LoginPage = () => {
     try {
       const result = await login(email, password);
       if (result.success) {
-        navigate('/');
+        if (result.require2FA) {
+          setShow2FA(true);
+          setTempId(result.tempId);
+          setMaskedEmail(result.email);
+        } else {
+          navigate('/');
+        }
       } else {
         setError(result.message || 'Invalid credentials');
       }
     } catch (err) {
       console.error(err);
       const message = err.response?.data?.message || 'Connection failed. Please try again.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handle2FAVerify = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await verify2FA(tempId, otp);
+      if (result.success) {
+        navigate('/');
+      } else {
+        setError(result.message || 'Invalid verification code');
+      }
+    } catch (err) {
+      console.error(err);
+      const message = err.response?.data?.message || 'Verification failed. Please try again.';
       setError(message);
     } finally {
       setLoading(false);
@@ -121,52 +152,107 @@ const LoginPage = () => {
                     <p className="text-slate-500 font-medium italic">Enter your credentials to access the POS dashboard.</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    {error && (
-                        <div className="p-4 bg-rose-50 border-2 border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 animate-in shake duration-500">
-                            <ShieldCheck size={20} className="shrink-0" />
-                            <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
-                        </div>
-                    )}
+                {!show2FA ? (
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        {error && (
+                            <div className="p-4 bg-rose-50 border-2 border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 animate-in shake duration-500">
+                                <ShieldCheck size={20} className="shrink-0" />
+                                <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
+                            </div>
+                        )}
 
-                    <FormInput 
-                        label="Email Address"
-                        type="email"
-                        required
-                        placeholder="cashier@restopos.com"
-                        icon={Mail}
-                        value={email}
-                        onChange={e => setEmail(e.target.value)}
-                    />
-
-                    <div className="space-y-1">
                         <FormInput 
-                            label="Password"
-                            type="password"
+                            label="Email Address"
+                            type="email"
                             required
-                            placeholder="••••••••"
-                            icon={Lock}
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
+                            placeholder="cashier@restopos.com"
+                            icon={Mail}
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
                         />
-                        <div className="flex justify-end">
-                            <button type="button" className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors uppercase tracking-widest">Forgot Password?</button>
-                        </div>
-                    </div>
 
-                    <div className="pt-4">
-                        <AppButton 
-                            variant="primary" 
-                            size="xl" 
-                            className="w-full" 
-                            type="submit"
-                            loading={loading}
-                            icon={ArrowRight}
-                        >
-                            Log into System
-                        </AppButton>
-                    </div>
-                </form>
+                        <div className="space-y-1">
+                            <FormInput 
+                                label="Password"
+                                type="password"
+                                required
+                                placeholder="••••••••"
+                                icon={Lock}
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                            />
+                            <div className="flex justify-end">
+                                <Link to="/forgot-password" size="xs" className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors uppercase tracking-widest">Forgot Password?</Link>
+                            </div>
+                        </div>
+
+                        <div className="pt-4">
+                            <AppButton 
+                                variant="primary" 
+                                size="xl" 
+                                className="w-full" 
+                                type="submit"
+                                loading={loading}
+                                icon={ArrowRight}
+                            >
+                                Log into System
+                            </AppButton>
+                        </div>
+                    </form>
+                ) : (
+                    <form onSubmit={handle2FAVerify} className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                         {error && (
+                            <div className="p-4 bg-rose-50 border-2 border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 animate-in shake duration-500">
+                                <ShieldCheck size={20} className="shrink-0" />
+                                <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
+                            </div>
+                        )}
+
+                        <div className="bg-slate-50 border border-slate-100 p-6 rounded-3xl space-y-4">
+                            <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center text-indigo-600">
+                                <ShieldCheck size={24} />
+                            </div>
+                            <div className="space-y-1">
+                                <h4 className="font-black text-slate-900 uppercase tracking-widest text-[10px]">Verification Required</h4>
+                                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                                    We sent a 6-digit code to <span className="text-indigo-600 font-bold">{maskedEmail}</span>. Please enter it below.
+                                </p>
+                            </div>
+                        </div>
+
+                        <FormInput 
+                            label="6-Digit Verification Code"
+                            type="text"
+                            maxLength={6}
+                            required
+                            placeholder="000000"
+                            icon={ShieldCheck}
+                            value={otp}
+                            className="text-center text-2xl tracking-[0.5em] font-black"
+                            onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
+                        />
+
+                        <div className="space-y-4">
+                            <AppButton 
+                                variant="primary" 
+                                size="xl" 
+                                className="w-full" 
+                                type="submit"
+                                loading={loading}
+                            >
+                                Verify & Continue
+                            </AppButton>
+                            
+                            <button 
+                                type="button"
+                                onClick={() => setShow2FA(false)}
+                                className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                            >
+                                Go back to login
+                            </button>
+                        </div>
+                    </form>
+                )}
 
                 <div className="mt-12 pt-8 border-t border-slate-100 text-center">
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Powered by RestoLedger v1.0</p>

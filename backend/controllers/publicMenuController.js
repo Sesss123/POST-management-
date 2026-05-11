@@ -197,15 +197,15 @@ exports.getPublicReceipt = async (req, res) => {
 
         // Fetch items
         const [items] = await db.query(
-            'SELECT * FROM invoice_items WHERE invoice_id = ?',
-            [invoice.id]
+            'SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?',
+            [invoice.id, invoice.shop_id]
         );
 
         // Fetch modifiers for each item
         for (let item of items) {
             const [mods] = await db.query(
-                'SELECT modifier_name as name, modifier_type as type, price_delta FROM invoice_item_modifiers WHERE invoice_item_id = ?',
-                [item.id]
+                'SELECT modifier_name as name, modifier_type as type, price_delta FROM invoice_item_modifiers WHERE invoice_item_id = ? AND shop_id = ?',
+                [item.id, invoice.shop_id]
             );
             item.modifiers = mods;
         }

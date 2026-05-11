@@ -10,8 +10,9 @@ exports.getPromotions = async (req, res) => {
             SELECT p.*, u.name as creator_name 
             FROM promotions p 
             LEFT JOIN users u ON p.created_by = u.id
+            WHERE p.shop_id = ?
             ORDER BY p.created_at DESC
-        `);
+        `, [req.shopId]);
         res.json({ success: true, data: promotions });
     } catch (error) {
         console.error(error);
@@ -32,11 +33,12 @@ exports.getApplicablePromotions = async (req, res) => {
         let query = `
             SELECT * FROM promotions 
             WHERE status = 'active' 
+            AND shop_id = ?
             AND start_date <= ? AND end_date >= ?
             AND (applicable_order_type = 'all' OR applicable_order_type = ?)
             AND min_order_amount <= ?
         `;
-        const params = [today, today, order_type || 'all', subtotal || 0];
+        const params = [req.shopId, today, today, order_type || 'all', subtotal || 0];
 
         const [promotions] = await db.query(query, params);
         
@@ -64,14 +66,14 @@ exports.createPromotion = async (req, res) => {
     try {
         const [result] = await db.query(
             `INSERT INTO promotions 
-            (name, type, value, start_date, end_date, start_time, end_time, min_order_amount, applicable_order_type, created_by) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [name, type, value, start_date, end_date, start_time || null, end_time || null, min_order_amount || 0, applicable_order_type || 'all', req.user.id]
+            (name, type, value, start_date, end_date, start_time, end_time, min_order_amount, applicable_order_type, created_by, shop_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [name, type, value, start_date, end_date, start_time || null, end_time || null, min_order_amount || 0, applicable_order_type || 'all', req.user.id, req.shopId]
         );
 
         await logAction(req.user.id, 'promotion_created', 'promotions', result.insertId, null, { name, type, value });
 
-        const [newPromo] = await db.query('SELECT * FROM promotions WHERE id = ?', [result.insertId]);
+        const [newPromo] = await db.query('SELECT * FROM promotions WHERE id = ? AND shop_id = ?', [result.insertId, req.shopId]);
         res.status(201).json({ success: true, data: newPromo[0] });
     } catch (error) {
         console.error(error);
@@ -84,7 +86,7 @@ exports.createPromotion = async (req, res) => {
 // @access  Private/Admin
 exports.deletePromotion = async (req, res) => {
     try {
-        await db.query('UPDATE promotions SET status = "inactive" WHERE id = ?', [req.params.id]);
+        await db.query('UPDATE promotions SET status = "inactive" WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
         
         await logAction(req.user.id, 'promotion_deactivated', 'promotions', req.params.id, null, { status: 'inactive' });
 

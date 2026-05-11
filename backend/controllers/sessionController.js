@@ -771,6 +771,8 @@ exports.transferTable = async (req, res) => {
 
         const where = buildIdOrUuidWhere('s', sessionId);
         const [sessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND shop_id = ?`, [where.value, req.shopId]);
+        if (sessions.length === 0) throw new Error('Active session not found');
+        const session = sessions[0];
         const sessionInternalId = session.id;
         
         if (session.table_id == target_table_id) throw new Error('Target table is the same as source table');
@@ -811,27 +813,27 @@ exports.mergeTable = async (req, res) => {
         await connection.beginTransaction();
 
         const where = buildIdOrUuidWhere('s', sourceSessionId);
-        const [sourceSessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open"`, [where.value]);
+        const [sourceSessions] = await connection.query(`SELECT * FROM table_sessions s WHERE ${where.query} AND status = "open" AND shop_id = ?`, [where.value, req.shopId]);
         if (sourceSessions.length === 0) throw new Error('Source session not found or not open');
         const sourceSession = sourceSessions[0];
 
-        const [targetSessions] = await connection.query('SELECT * FROM table_sessions WHERE table_id = ? AND status = "open"', [target_table_id]);
+        const [targetSessions] = await connection.query('SELECT * FROM table_sessions WHERE table_id = ? AND status = "open" AND shop_id = ?', [target_table_id, req.shopId]);
         if (targetSessions.length === 0) throw new Error('Target table does not have an open session. Use transfer instead.');
         const targetSession = targetSessions[0];
 
         if (sourceSession.id === targetSession.id) throw new Error('Source and target sessions are the same');
 
         // Move active order_items
-        await connection.query('UPDATE order_items SET session_id = ? WHERE session_id = ? AND status != "billed"', [targetSession.id, sourceSession.id]);
+        await connection.query('UPDATE order_items SET session_id = ? WHERE session_id = ? AND status != "billed" AND shop_id = ?', [targetSession.id, sourceSession.id, req.shopId]);
 
         // Move kot_orders
-        await connection.query('UPDATE kot_orders SET session_id = ?, table_id = ? WHERE session_id = ?', [targetSession.id, target_table_id, sourceSession.id]);
+        await connection.query('UPDATE kot_orders SET session_id = ?, table_id = ? WHERE session_id = ? AND shop_id = ?', [targetSession.id, target_table_id, sourceSession.id, req.shopId]);
 
         // Close source session
-        await connection.query('UPDATE table_sessions SET status = "merged", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', [req.user.id, sourceSession.id]);
+        await connection.query('UPDATE table_sessions SET status = "merged", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?', [req.user.id, sourceSession.id, req.shopId]);
         
         // Free source table
-        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ?', [sourceSession.table_id]);
+        await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [sourceSession.table_id, req.shopId]);
 
         await logAction(req.user.id, 'table_merged', 'table_session', sourceSession.id, null, { merged_into: targetSession.id, source_table: sourceSession.table_id, target_table: target_table_id });
 
@@ -868,7 +870,7 @@ exports.cancelSession = async (req, res) => {
         if (billedItems.length > 0) throw new Error('Cannot cancel session with billed items. Process payment instead.');
 
         // 1. Close session
-        await connection.query('UPDATE table_sessions SET status = "cancelled", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ?', [req.user.id, session.id]);
+        await connection.query('UPDATE table_sessions SET status = "cancelled", closed_at = CURRENT_TIMESTAMP, closed_by = ? WHERE id = ? AND shop_id = ?', [req.user.id, session.id, req.shopId]);
 
         // 2. Free table
         await connection.query('UPDATE restaurant_tables SET status = "available" WHERE id = ? AND shop_id = ?', [session.table_id, req.shopId]);

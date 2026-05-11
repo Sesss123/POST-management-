@@ -60,8 +60,8 @@ exports.adjustStock = async (req, res) => {
         }
 
         await connection.query(
-            'UPDATE items SET stock_qty = ?, availability_status = ? WHERE id = ?',
-            [newStock, availabilityStatus, item_id]
+            'UPDATE items SET stock_qty = ?, availability_status = ? WHERE id = ? AND shop_id = ?',
+            [newStock, availabilityStatus, item_id, req.shopId]
         );
 
         // 3. Record movement

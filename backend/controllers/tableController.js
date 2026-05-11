@@ -5,7 +5,7 @@ const { db } = require('../config/db');
 // @access  Private
 exports.getTables = async (req, res) => {
     try {
-        const [tables] = await db.query('SELECT * FROM restaurant_tables ORDER BY table_no ASC');
+        const [tables] = await db.query('SELECT * FROM restaurant_tables WHERE shop_id = ? ORDER BY table_no ASC', [req.shopId]);
         res.json({ success: true, data: tables });
     } catch (error) {
         console.error(error);
@@ -19,8 +19,8 @@ exports.getTables = async (req, res) => {
 exports.updateTableStatus = async (req, res) => {
     const { status } = req.body;
     try {
-        await db.query('UPDATE restaurant_tables SET status = ? WHERE id = ?', [status, req.params.id]);
-        const [updatedTable] = await db.query('SELECT * FROM restaurant_tables WHERE id = ?', [req.params.id]);
+        await db.query('UPDATE restaurant_tables SET status = ? WHERE id = ? AND shop_id = ?', [status, req.params.id, req.shopId]);
+        const [updatedTable] = await db.query('SELECT * FROM restaurant_tables WHERE id = ? AND shop_id = ?', [req.params.id, req.shopId]);
         
         if (updatedTable.length === 0) return res.status(404).json({ success: false, message: 'Table not found' });
         res.json({ success: true, message: 'Table status updated', data: updatedTable[0] });
@@ -36,8 +36,8 @@ exports.updateTableStatus = async (req, res) => {
 exports.createTable = async (req, res) => {
     const { table_no } = req.body;
     try {
-        const [result] = await db.query('INSERT INTO restaurant_tables (table_no) VALUES (?)', [table_no]);
-        const [newTable] = await db.query('SELECT * FROM restaurant_tables WHERE id = ?', [result.insertId]);
+        const [result] = await db.query('INSERT INTO restaurant_tables (table_no, shop_id) VALUES (?, ?)', [table_no, req.shopId]);
+        const [newTable] = await db.query('SELECT * FROM restaurant_tables WHERE id = ? AND shop_id = ?', [result.insertId, req.shopId]);
         res.status(201).json({ success: true, data: newTable[0] });
     } catch (error) {
         console.error(error);

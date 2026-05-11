@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reportApi } from '../api/api';
+import { reportApi, shiftApi } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import { 
   ShoppingCart, 
@@ -16,7 +16,7 @@ import {
   Zap,
   CreditCard
 } from 'lucide-react';
-import { StatCard, AppButton } from '../components/ui';
+import { StatCard, AppButton, Skeleton as UiSkeleton } from '../components/ui';
 import { cn } from '../utils/cn';
 import QuickRetailModal from '../components/pos/QuickRetailModal';
 
@@ -24,18 +24,25 @@ const CashierDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
+  const [shift, setShift] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showQuickRetail, setShowQuickRetail] = useState(false);
 
   useEffect(() => {
-    fetchStats();
+    fetchDashboardData();
   }, []);
-  const fetchStats = async () => {
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
     try {
-      const { data } = await reportApi.getCashierDashboard();
-      setStats(data.data);
+      const [statsRes, shiftRes] = await Promise.all([
+        reportApi.getCashierDashboard(),
+        shiftApi.getCurrent()
+      ]);
+      setStats(statsRes.data.data);
+      setShift(shiftRes.data.data);
     } catch (err) {
-      console.error(err);
+      console.error('Cashier Dashboard Error:', err);
     } finally {
       setLoading(false);
     }
@@ -145,11 +152,23 @@ const CashierDashboard = () => {
                     <p className="text-sm font-bold text-slate-700">{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                 </div>
             </div>
-            {/* Shift Status placeholder - can be updated to fetch actual shift status */}
-            <div className="bg-emerald-50 border border-emerald-100 p-2 px-4 rounded-[20px] flex items-center gap-3">
-                <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
-                <p className="text-xs font-bold text-emerald-700 uppercase tracking-widest">Shift Open</p>
-            </div>
+            
+            {loading ? (
+                <Skeleton className="h-10 w-32 rounded-[20px]" />
+            ) : shift ? (
+                <div className="bg-emerald-50 border border-emerald-100 p-2 px-4 rounded-[20px] flex items-center gap-3">
+                    <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
+                    <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Shift Open</p>
+                        <p className="text-[9px] font-bold text-emerald-600/70">Start: {new Date(shift.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                    </div>
+                </div>
+            ) : (
+                <div className="bg-slate-100 border border-slate-200 p-2 px-4 rounded-[20px] flex items-center gap-3 grayscale">
+                    <div className="w-2.5 h-2.5 bg-slate-400 rounded-full" />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">No Open Shift</p>
+                </div>
+            )}
         </div>
       </header>
 
@@ -189,41 +208,41 @@ const CashierDashboard = () => {
 
       {/* Stats Grid */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-        <StatCard 
-            title="Today Cash" 
-            value={`Rs. ${parseFloat(stats?.summary?.todayCash || 0).toLocaleString()}`} 
-            icon={Banknote} 
-            variant="success"
-        />
-        <StatCard 
-            title="Today QR" 
-            value={`Rs. ${parseFloat(stats?.summary?.todayQR || 0).toLocaleString()}`} 
-            icon={Zap} 
-            variant="primary"
-        />
-        <StatCard 
-            title="Today Card" 
-            value={`Rs. ${parseFloat(stats?.summary?.todayCard || 0).toLocaleString()}`} 
-            icon={CreditCard} 
-            variant="info"
-        />
-        <StatCard 
-            title="Today Credit" 
-            value={`Rs. ${parseFloat(stats?.summary?.todayCredit || 0).toLocaleString()}`} 
-            icon={BookOpen} 
-            variant="credit"
-        />
-        <StatCard 
-            title="Invoices Today" 
-            value={stats?.summary?.invoiceCount || 0} 
-            icon={Receipt} 
-        />
-        <StatCard 
-            title="Open Tables" 
-            value={stats?.summary?.openTables || 0} 
-            icon={Grid3X3} 
-            variant="dark"
-        />
+        {loading ? (
+            [...Array(5)].map((_, i) => <Skeleton key={i} className="h-32 rounded-[32px]" />)
+        ) : (
+            <>
+                <StatCard 
+                    title="Today Cash" 
+                    value={`Rs. ${parseFloat(stats?.summary?.todayCash || 0).toLocaleString()}`} 
+                    icon={Banknote} 
+                    variant="success"
+                />
+                <StatCard 
+                    title="Today QR" 
+                    value={`Rs. ${parseFloat(stats?.summary?.todayQR || 0).toLocaleString()}`} 
+                    icon={Zap} 
+                    variant="primary"
+                />
+                <StatCard 
+                    title="Today Card" 
+                    value={`Rs. ${parseFloat(stats?.summary?.todayCard || 0).toLocaleString()}`} 
+                    icon={CreditCard} 
+                    variant="info"
+                />
+                <StatCard 
+                    title="Today Credit" 
+                    value={`Rs. ${parseFloat(stats?.summary?.todayCredit || 0).toLocaleString()}`} 
+                    icon={BookOpen} 
+                    variant="credit"
+                />
+                <StatCard 
+                    title="Invoices Today" 
+                    value={stats?.summary?.invoiceCount || 0} 
+                    icon={Receipt} 
+                />
+            </>
+        )}
       </section>
 
       {/* Recent Invoices Table */}
@@ -243,7 +262,16 @@ const CashierDashboard = () => {
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                      {stats?.recentInvoices?.map(inv => (
+                      {loading ? (
+                          [...Array(3)].map((_, i) => (
+                              <tr key={i}>
+                                  <td className="px-8 py-5"><UiSkeleton className="h-4 w-24 mb-2" /><UiSkeleton className="h-3 w-16" /></td>
+                                  <td className="px-8 py-5"><UiSkeleton className="h-4 w-32" /></td>
+                                  <td className="px-8 py-5"><UiSkeleton className="h-6 w-20 rounded-full" /></td>
+                                  <td className="px-8 py-5 text-right"><UiSkeleton className="h-4 w-20 ml-auto" /></td>
+                              </tr>
+                          ))
+                      ) : stats?.recentInvoices?.map(inv => (
                           <tr key={inv.id} className="hover:bg-slate-50/30 transition-colors">
                               <td className="px-8 py-5">
                                   <p className="text-sm font-bold text-slate-700">{new Date(inv.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
@@ -265,7 +293,7 @@ const CashierDashboard = () => {
                               </td>
                           </tr>
                       ))}
-                      {(!stats?.recentInvoices || stats.recentInvoices.length === 0) && (
+                      {(!loading && (!stats?.recentInvoices || stats.recentInvoices.length === 0)) && (
                           <tr><td colSpan={4} className="py-12 text-center text-slate-400 italic">No transactions yet</td></tr>
                       )}
                   </tbody>
@@ -276,7 +304,7 @@ const CashierDashboard = () => {
       <QuickRetailModal 
         isOpen={showQuickRetail} 
         onClose={() => setShowQuickRetail(false)}
-        onSuccess={() => fetchStats()}
+        onSuccess={() => fetchDashboardData()}
       />
     </div>
   );

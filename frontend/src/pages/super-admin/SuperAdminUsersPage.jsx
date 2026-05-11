@@ -14,8 +14,9 @@ import {
   ShieldAlert,
   ShieldCheck
 } from 'lucide-react';
-import api from '../../api/apiClient';
+import { superAdminApi } from '../../api/api';
 import { useToast } from '../../components/ui/Feedback';
+import { cn } from '../../utils/cn';
 
 
 const SuperAdminUsersPage = () => {
@@ -27,6 +28,7 @@ const SuperAdminUsersPage = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'super_admin' });
+  const [filter, setFilter] = useState('all'); // 'all', 'active', 'global_admin'
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -36,7 +38,7 @@ const SuperAdminUsersPage = () => {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/super-admin/users');
+      const res = await superAdminApi.getPlatformUsers();
       if (res.data.success) {
         setUsers(res.data.data);
       }
@@ -50,7 +52,7 @@ const SuperAdminUsersPage = () => {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      const res = await api.post('/super-admin/users', formData);
+      const res = await superAdminApi.createPlatformUser(formData);
       if (res.data.success) {
         showToast('User created successfully', 'success');
         setShowAddModal(false);
@@ -65,7 +67,7 @@ const SuperAdminUsersPage = () => {
   const handleStatusToggle = async (user) => {
     const newStatus = user.status === 'active' ? 'inactive' : 'active';
     try {
-      await api.patch(`/super-admin/users/${user.id}/status`, { status: newStatus });
+      await superAdminApi.updateUserStatus(user.id, newStatus);
       showToast(`User ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'success');
       fetchUsers();
     } catch (error) {
@@ -76,7 +78,7 @@ const SuperAdminUsersPage = () => {
   const handleResetPassword = async (e) => {
     e.preventDefault();
     try {
-      await api.post(`/super-admin/users/${selectedUser.id}/reset-password`, { password: newPassword });
+      await superAdminApi.resetUserPassword(selectedUser.id, newPassword);
       showToast('Password reset successful', 'success');
       setShowPasswordModal(false);
       setNewPassword('');
@@ -85,14 +87,19 @@ const SuperAdminUsersPage = () => {
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(search.toLowerCase()) || 
-    u.email.toLowerCase().includes(search.toLowerCase()) ||
-    u.shop_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = 
+      u.name.toLowerCase().includes(search.toLowerCase()) || 
+      u.email.toLowerCase().includes(search.toLowerCase()) ||
+      u.shop_name?.toLowerCase().includes(search.toLowerCase());
+    
+    if (filter === 'active') return matchesSearch && u.status === 'active';
+    if (filter === 'global_admin') return matchesSearch && u.role === 'super_admin';
+    return matchesSearch;
+  });
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -108,16 +115,52 @@ const SuperAdminUsersPage = () => {
         </button>
       </div>
 
-      {/* Stats Mini Row */}
+      {/* Stats Mini Row / Filters */}
       <div className="flex flex-wrap gap-4">
-        <div className="px-6 py-3 bg-slate-900/50 border border-white/5 rounded-2xl flex items-center gap-3">
+        <button 
+          onClick={() => setFilter(filter === 'all' ? 'active' : 'all')}
+          className={cn(
+            "px-6 py-3 border rounded-2xl flex items-center gap-3 transition-all",
+            filter === 'active' 
+              ? "bg-emerald-500/10 border-emerald-500/30 ring-1 ring-emerald-500/20" 
+              : "bg-slate-900/50 border-white/5 hover:bg-slate-900"
+          )}
+        >
           <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-          <span className="text-xs font-black text-white uppercase tracking-widest">{users.filter(u => u.status === 'active').length} Active Users</span>
-        </div>
-        <div className="px-6 py-3 bg-slate-900/50 border border-white/5 rounded-2xl flex items-center gap-3 text-slate-500">
-          <Shield size={16} />
-          <span className="text-xs font-black uppercase tracking-widest">{users.filter(u => u.role === 'super_admin').length} Global Admins</span>
-        </div>
+          <span className={cn(
+            "text-xs font-black uppercase tracking-widest",
+            filter === 'active' ? "text-emerald-400" : "text-white"
+          )}>
+            {users.filter(u => u.status === 'active').length} Active Users
+          </span>
+        </button>
+
+        <button 
+          onClick={() => setFilter(filter === 'global_admin' ? 'all' : 'global_admin')}
+          className={cn(
+            "px-6 py-3 border rounded-2xl flex items-center gap-3 transition-all",
+            filter === 'global_admin' 
+              ? "bg-indigo-500/10 border-indigo-500/30 ring-1 ring-indigo-500/20" 
+              : "bg-slate-900/50 border-white/5 hover:bg-slate-900"
+          )}
+        >
+          <Shield size={16} className={filter === 'global_admin' ? "text-indigo-400" : "text-slate-500"} />
+          <span className={cn(
+            "text-xs font-black uppercase tracking-widest",
+            filter === 'global_admin' ? "text-indigo-400" : "text-slate-500"
+          )}>
+            {users.filter(u => u.role === 'super_admin').length} Global Admins
+          </span>
+        </button>
+
+        {filter !== 'all' && (
+          <button 
+            onClick={() => setFilter('all')}
+            className="text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors ml-2"
+          >
+            Clear Filters
+          </button>
+        )}
       </div>
 
       {/* Search and Filters */}

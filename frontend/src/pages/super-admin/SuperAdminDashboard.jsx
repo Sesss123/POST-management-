@@ -11,7 +11,8 @@ import {
   ShieldCheck,
   AlertCircle
 } from 'lucide-react';
-import apiClient from '../../api/apiClient';
+import { Link } from 'react-router-dom';
+import { superAdminApi } from '../../api/api';
 import { cn } from '../../utils/cn';
 
 const StatCard = ({ title, value, icon: Icon, color, trend }) => (
@@ -48,7 +49,7 @@ const SuperAdminDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const { data } = await apiClient.get('/super-admin/stats');
+      const { data } = await superAdminApi.getStats();
       if (data.success) {
         setStats(data.data);
       }
@@ -64,63 +65,66 @@ const SuperAdminDashboard = () => {
   if (error) return <div className="p-8 bg-rose-500/10 border border-rose-500/20 rounded-3xl text-rose-500 flex items-center gap-3"><AlertCircle size={20} />{error}</div>;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
+    <div className="space-y-10 animate-in fade-in duration-1000 pb-20 relative">
+      {/* Background Subtle Glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-indigo-600/5 blur-[120px] rounded-full -z-10" />
+
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
           <h1 className="text-4xl font-black text-white tracking-tight">Platform Overview</h1>
-          <p className="text-slate-400 mt-2">Global system statistics and shop performance.</p>
+          <p className="text-slate-400 mt-2 font-medium">Global system telemetry and tenant performance matrix.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-white font-bold text-sm transition-all flex items-center gap-2">
-            <Activity size={18} className="text-indigo-400" />
-            System Health
-          </button>
-          <button className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-bold text-sm shadow-xl shadow-indigo-900/40 transition-all flex items-center gap-2">
-            <Plus size={18} />
-            Onboard New Shop
-          </button>
+          <Link to="/super-admin/system-health" className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-white font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2">
+            <Activity size={16} className="text-indigo-400" />
+            Live Health
+          </Link>
+          <Link to="/super-admin/shops/new" className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-900/40 transition-all flex items-center gap-2">
+            <Plus size={16} />
+            Onboard Shop
+          </Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         <StatCard 
-          title="Total Active Shops" 
-          value={stats?.shops_count || 0} 
+          title="Active Tenants" 
+          value={stats?.shops?.total || 0} 
           icon={Store} 
           color="bg-indigo-600"
-          trend="+2 this month"
+          trend={stats?.shops?.new_this_month ? `+${stats.shops.new_this_month} this month` : '0 this month'}
         />
         <StatCard 
-          title="Global Platform Users" 
+          title="Platform Users" 
           value={stats?.users_count || 0} 
           icon={Users} 
           color="bg-violet-600"
-          trend="+12 this week"
+          trend={null}
         />
         <StatCard 
-          title="Total System GMV" 
-          value={`Rs. ${(stats?.total_revenue || 0).toLocaleString()}`} 
+          title="Monthly Revenue" 
+          value={`Rs. ${Number(stats?.revenue_trends?.this_month || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} 
           icon={TrendingUp} 
           color="bg-emerald-600"
-          trend="Lifetime"
+          trend={stats?.revenue_trends?.delta > 0 ? `+Rs. ${stats.revenue_trends.delta.toLocaleString()}` : stats?.revenue_trends?.delta < 0 ? `-Rs. ${Math.abs(stats.revenue_trends.delta).toLocaleString()}` : 'Steady'}
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <Store className="text-indigo-400" size={24} />
+            <h2 className="text-xs font-black text-white uppercase tracking-widest opacity-60 flex items-center gap-2">
+              <Store className="text-indigo-400" size={16} />
               Recent Onboardings
             </h2>
-            <button className="text-indigo-400 text-sm font-bold hover:text-white transition-colors">View All Shops</button>
+            <button className="text-indigo-400 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors">View All Shops</button>
           </div>
           
-          <div className="bg-slate-900/50 border border-white/5 rounded-[2.5rem] overflow-hidden">
+          <div className="bg-slate-900/50 border border-white/5 rounded-[2.5rem] overflow-hidden backdrop-blur-sm">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/5">
-                  <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Shop Name</th>
+                <tr className="bg-white/[0.02] border-b border-white/5">
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Shop Entity</th>
                   <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Identifier</th>
                   <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
                   <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Action</th>
@@ -165,38 +169,75 @@ const SuperAdminDashboard = () => {
           </h2>
           
           <div className="bg-slate-900/50 border border-white/5 rounded-[2.5rem] p-8 space-y-6">
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-400">Database</span>
-                <span className="flex items-center gap-1.5 text-xs font-black text-emerald-400 uppercase tracking-widest">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Optimal
+                <span className={cn(
+                  "flex items-center gap-1.5 text-xs font-black uppercase tracking-widest",
+                  stats?.server_health?.db_status === 'connected' ? "text-emerald-400" : "text-rose-400"
+                )}>
+                  <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", stats?.server_health?.db_status === 'connected' ? "bg-emerald-400" : "bg-rose-400")} />
+                  {stats?.server_health?.db_status === 'connected' ? 'Connected' : 'Error'}
                 </span>
               </div>
+              
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-400">API Gateway</span>
+                <span className="text-sm font-medium text-slate-400">Server Status</span>
                 <span className="flex items-center gap-1.5 text-xs font-black text-emerald-400 uppercase tracking-widest">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Active
+                  Online
                 </span>
               </div>
+
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-400">Backups</span>
-                <span className="flex items-center gap-1.5 text-xs font-black text-indigo-400 uppercase tracking-widest">
-                  Scheduled
+                <span className="text-sm font-medium text-slate-400">Memory Usage</span>
+                <div className="text-right">
+                    <span className="text-xs font-black text-white uppercase tracking-widest">
+                    {stats?.server_health?.memory_used_mb || 0} MB
+                    </span>
+                    <div className="w-24 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
+                        <div 
+                            className="h-full bg-indigo-500 transition-all duration-1000" 
+                            style={{ width: `${Math.min(100, ((stats?.server_health?.memory_used_mb || 0) / (stats?.server_health?.memory_total_mb || 16000)) * 100)}%` }}
+                        />
+                    </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-400">Uptime</span>
+                <span className="text-xs font-black text-slate-300 uppercase tracking-widest">
+                  {(() => {
+                    const s = stats?.server_health?.uptime_seconds || 0;
+                    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+                    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+                  })()}
                 </span>
               </div>
             </div>
 
             <div className="pt-6 border-t border-white/5">
-              <div className="p-4 bg-indigo-600/10 border border-indigo-600/20 rounded-2xl">
-                <div className="flex items-center gap-3 text-indigo-400 mb-2">
+              <div className={cn(
+                "p-4 rounded-2xl border",
+                (stats?.security?.failed_logins_24h > 10 || stats?.security?.unauthorized_attempts_24h > 0) 
+                  ? "bg-rose-600/10 border-rose-600/20" 
+                  : "bg-indigo-600/10 border-indigo-600/20"
+              )}>
+                <div className={cn(
+                  "flex items-center gap-3 mb-2",
+                  (stats?.security?.failed_logins_24h > 10 || stats?.security?.unauthorized_attempts_24h > 0) ? "text-rose-400" : "text-indigo-400"
+                )}>
                   <ShieldCheck size={18} />
-                  <span className="text-xs font-black uppercase tracking-widest">Security Audit</span>
+                  <span className="text-xs font-black uppercase tracking-widest">Security Telemetry (24h)</span>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Last global security audit completed 2 days ago. No vulnerabilities detected.
-                </p>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400">
+                    Failed Logins: <span className={cn(stats?.security?.failed_logins_24h > 10 ? "text-rose-400" : "text-white")}>{stats?.security?.failed_logins_24h || 0}</span>
+                  </p>
+                  <p className="text-[10px] font-bold text-slate-400">
+                    Unauthorized Access: <span className={cn(stats?.security?.unauthorized_attempts_24h > 0 ? "text-rose-400" : "text-white")}>{stats?.security?.unauthorized_attempts_24h || 0} blocks</span>
+                  </p>
+                </div>
               </div>
             </div>
           </div>

@@ -17,9 +17,10 @@ exports.getActiveKots = async (req, res) => {
             LEFT JOIN users u ON k.created_by = u.id
             WHERE k.status IN ('pending', 'preparing', 'ready', 'served')
             AND DATE(k.created_at) = CURDATE()
+            AND k.shop_id = ?
         `;
         
-        const params = [];
+        const params = [req.shopId];
         if (status) {
             query += " AND k.status = ?";
             params.push(status);
@@ -65,9 +66,10 @@ exports.getHistoryKots = async (req, res) => {
             LEFT JOIN users u ON k.created_by = u.id
             WHERE k.status IN ('served', 'cancelled')
             AND DATE(k.created_at) = ?
+            AND k.shop_id = ?
         `;
         
-        const params = [targetDate];
+        const params = [targetDate, req.shopId];
         if (order_type) {
             query += " AND k.order_type = ?";
             params.push(order_type);
@@ -109,8 +111,8 @@ exports.updateKotStatus = async (req, res) => {
         await connection.beginTransaction();
 
         const where = buildIdOrUuidWhere('k', req.params.id);
-        // Check current status
-        const [kots] = await connection.query(`SELECT id, status, kot_no FROM kot_orders k WHERE ${where.query}`, [where.value]);
+        // Check current status and shop_id ownership
+        const [kots] = await connection.query(`SELECT id, status, kot_no FROM kot_orders k WHERE ${where.query} AND k.shop_id = ?`, [where.value, req.shopId]);
         if (kots.length === 0) throw new Error('KOT not found');
         
         const kotId = kots[0].id;
@@ -179,7 +181,8 @@ exports.cancelKot = async (req, res) => {
         await connection.beginTransaction();
 
         const where = buildIdOrUuidWhere('k', req.params.id);
-        const [kots] = await connection.query(`SELECT id, status, kot_no FROM kot_orders k WHERE ${where.query}`, [where.value]);
+        // Verify ownership and status
+        const [kots] = await connection.query(`SELECT id, status, kot_no FROM kot_orders k WHERE ${where.query} AND k.shop_id = ?`, [where.value, req.shopId]);
         if (kots.length === 0) throw new Error('KOT not found');
         
         const kotId = kots[0].id;
@@ -218,8 +221,14 @@ exports.updateItemStatus = async (req, res) => {
     const identifier = req.params.itemId;
 
     try {
-        const where = buildIdOrUuidWhere(null, identifier);
-        await db.query(`UPDATE kot_items SET status = ? WHERE ${where.query}`, [status, where.value]);
+        const where = buildIdOrUuidWhere('ki', identifier);
+        // Scoped update to ensure item belongs to a KOT of the same shop
+        await db.query(`
+            UPDATE kot_items ki
+            JOIN kot_orders ko ON ki.kot_id = ko.id
+            SET ki.status = ? 
+            WHERE ${where.query} AND ko.shop_id = ?
+        `, [status, where.value, req.shopId]);
         res.json({ success: true, message: 'Item status updated' });
     } catch (error) {
         console.error('Update Item Status Error:', error);

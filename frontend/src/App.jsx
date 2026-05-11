@@ -34,6 +34,8 @@ import PublicMenuPage from './pages/PublicMenuPage';
 import PublicReceiptPage from './pages/PublicReceiptPage';
 import MarketingPage from './pages/MarketingPage';
 import DeliveryOrdersPage from './pages/DeliveryOrdersPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 
 // Super Admin Components
 import SuperAdminLayout from './components/layout/SuperAdminLayout';
@@ -45,6 +47,7 @@ import SuperAdminUsersPage from './pages/super-admin/SuperAdminUsersPage';
 import SystemHealthPage from './pages/super-admin/SystemHealthPage';
 import SuperAdminBackupsPage from './pages/super-admin/SuperAdminBackupsPage';
 import SuperAdminAuditLogsPage from './pages/super-admin/SuperAdminAuditLogsPage';
+import SuperAdminSecurityPage from './pages/super-admin/SuperAdminSecurityPage';
 import SuperAdminAnalytics from './pages/super-admin/SuperAdminAnalytics';
 import SubscriptionsPage from './pages/super-admin/SubscriptionsPage';
 import SubscriptionPaymentsPage from './pages/super-admin/SubscriptionPaymentsPage';
@@ -91,6 +94,8 @@ function App() {
             <Router>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
               
               {/* Public Routes — shop-scoped QR menus */}
               <Route path="/menu/:shopIdentifier/table/:tableNo" element={<PublicMenuPage />} />
@@ -118,6 +123,7 @@ function App() {
                 <Route path="backups" element={<SuperAdminBackupsPage />} />
                 <Route path="analytics" element={<SuperAdminAnalytics />} />
                 <Route path="audit-logs" element={<SuperAdminAuditLogsPage />} />
+                <Route path="security" element={<SuperAdminSecurityPage />} />
                 <Route path="settings" element={<SuperAdminSettingsPage />} />
               </Route>
               

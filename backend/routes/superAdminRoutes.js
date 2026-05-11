@@ -11,9 +11,10 @@ router.use(authorize('super_admin'));
 // Platform overview
 router.get('/overview', saController.getStats);
 router.get('/analytics', saController.getAnalytics);
-router.get('/health', saController.getHealth);
+router.get('/health', getSystemHealth);
 router.get('/system-health', getSystemHealth);
 router.get('/audit-logs', saController.getAuditLogs);
+router.get('/security', saController.getSecurityMetrics);
 
 // Shop management
 router.get('/shops', saController.getShops);

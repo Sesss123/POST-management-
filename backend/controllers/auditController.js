@@ -8,9 +8,9 @@ const getLogs = async (req, res) => {
             SELECT a.*, u.name as user_name 
             FROM audit_logs a
             LEFT JOIN users u ON a.user_id = u.id
-            WHERE 1=1
+            WHERE a.shop_id = ?
         `;
-        const params = [];
+        const params = [req.shopId];
 
         if (action) {
             sql += ' AND a.action = ?';

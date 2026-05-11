@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Server, Database, Store, CreditCard, HardDrive, ShieldCheck, AlertTriangle, AlertCircle, CheckCircle2, XCircle, RefreshCw, Activity, Package, Receipt, Clock, Wifi } from 'lucide-react';
-import apiClient from '../../api/apiClient';
+import { superAdminApi } from '../../api/api';
 import { cn } from '../../utils/cn';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ export default function SystemHealthPage() {
     const load = useCallback(async () => {
         setLoading(true); setError(null);
         try {
-            const res = await apiClient.get('/super-admin/system-health');
+            const res = await superAdminApi.getSystemHealth();
             if (res.data.success) { setData(res.data.data); setRefreshed(new Date()); }
             else setError('Unexpected response from server.');
         } catch (e) {
@@ -177,6 +177,7 @@ export default function SystemHealthPage() {
                             <Row label="Environment" value={fmt(d.server?.environment)} />
                             <Row label="Platform / Arch" value={`${fmt(d.server?.platform)} / ${fmt(d.server?.arch)}`} />
                             <Row label="Uptime" value={fmtUptime(d.server?.uptime_seconds)} />
+                            <Row label="Load Average" value={d.server?.load_avg ? d.server.load_avg.map(l => l.toFixed(2)).join(' / ') : 'N/A'} />
                             <Row label="Memory Used (RSS)" value={fmt(d.server?.memory_used_mb, ' MB')} />
                             <Row label="Heap Used / Total" value={`${fmt(d.server?.memory_heap_used_mb)} / ${fmt(d.server?.memory_heap_total_mb)} MB`} />
                             <Row label="OS Total RAM" value={d.server?.memory_total_mb ? `${d.server.memory_total_mb} MB` : 'N/A'} />

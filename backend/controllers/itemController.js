@@ -188,7 +188,7 @@ exports.updateItem = async (req, res) => {
 
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldItem] = await db.query(`SELECT * FROM items WHERE ${where.query}`, [where.value]);
+        const [oldItem] = await db.query(`SELECT * FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldItem.length === 0) return res.status(404).json({ success: false, message: 'Item not found' });
         const itemId = oldItem[0].id;
 
@@ -335,7 +335,7 @@ exports.updateUsability = async (req, res) => {
     const { is_popular, short_code, display_order } = req.body;
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
-        const [oldItem] = await db.query(`SELECT * FROM items WHERE ${where.query}`, [where.value]);
+        const [oldItem] = await db.query(`SELECT * FROM items WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
         if (oldItem.length === 0) return res.status(404).json({ success: false, message: 'Item not found' });
         const itemId = oldItem[0].id;
 

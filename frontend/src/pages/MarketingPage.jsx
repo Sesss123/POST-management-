@@ -28,7 +28,7 @@ import {
   useToast
 } from '../components/ui';
 import { cn } from '../utils/cn';
-import axios from 'axios';
+import apiClient from '../api/apiClient';
 
 const MarketingPage = () => {
   const toast = useToast();
@@ -49,10 +49,7 @@ const MarketingPage = () => {
   const fetchCampaigns = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const { data } = await axios.get('/api/marketing/campaigns', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const { data } = await apiClient.get('/marketing/campaigns');
       setCampaigns(data.data);
     } catch (err) {
       toast.error('Failed to load campaigns');
@@ -65,10 +62,7 @@ const MarketingPage = () => {
     e.preventDefault();
     setSending(true);
     try {
-      const token = localStorage.getItem('token');
-      await axios.post('/api/marketing/campaigns', newCampaign, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.post('/marketing/campaigns', newCampaign);
       toast.success('Campaign initiated successfully');
       setShowCreate(false);
       setNewCampaign({ name: '', message: '', targetGroup: 'all' });

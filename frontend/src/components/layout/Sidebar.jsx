@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { 
   LayoutDashboard, 
   ShoppingCart, 
@@ -68,6 +69,7 @@ const Sidebar = ({ mobile, onClose }) => {
   const { isFeatureBlocked } = useSubscription();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
 
   const navigationGroups = [
     {

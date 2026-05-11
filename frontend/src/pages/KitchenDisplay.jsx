@@ -21,7 +21,9 @@ import {
   User,
   MoreVertical,
   CheckCircle,
-  Clock3
+  Clock3,
+  Plus,
+  MessageSquare
 } from 'lucide-react';
 import { 
   AppButton, 

@@ -9,7 +9,7 @@
  */
 
 const { db } = require('../config/db');
-const { resolveEffectiveStatus } = require('../middleware/subscriptionMiddleware');
+const { resolveEffectiveSubscriptionStatus } = require('../services/subscriptionService');
 const os = require('os');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -43,6 +43,7 @@ exports.getSystemHealth = async (req, res) => {
     // 1. SERVER — Node.js process only. No fake CPU/disk.
     // ══════════════════════════════════════════════════════════════════════════
     const mem = process.memoryUsage();
+    const loadAvg = os.loadavg();
     const server = {
         status: 'online',
         uptime_seconds: Math.floor(process.uptime()),
@@ -50,17 +51,37 @@ exports.getSystemHealth = async (req, res) => {
         environment: process.env.NODE_ENV || 'development',
         platform: process.platform,
         arch: process.arch,
+        load_avg: loadAvg, // [1min, 5min, 15min]
         memory_used_mb: Math.round(mem.rss / 1024 / 1024),
         memory_heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
         memory_heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
-        memory_total_mb: (() => {
-            try { return Math.round(os.totalmem() / 1024 / 1024); } catch { return null; }
-        })(),
-        memory_free_mb: (() => {
-            try { return Math.round(os.freemem() / 1024 / 1024); } catch { return null; }
-        })(),
+        memory_total_mb: Math.round(os.totalmem() / 1024 / 1024),
+        memory_free_mb: Math.round(os.freemem() / 1024 / 1024),
         disk_status: 'not_available', // no safe cross-platform disk check without extra deps
     };
+
+    // Alert on high load (e.g., 1-min load > number of CPUs)
+    const cpuCount = os.cpus().length;
+    if (loadAvg[0] > cpuCount * 0.8) {
+        setStatus('warning');
+        alerts.push({
+            severity: 'warning',
+            title: 'High CPU Load',
+            description: `System load average is high (${loadAvg[0].toFixed(2)}). Performance may be degraded.`,
+            action_link: null
+        });
+    }
+
+    // Alert on low memory (e.g., < 10% free)
+    if (server.memory_free_mb < server.memory_total_mb * 0.1) {
+        setStatus('warning');
+        alerts.push({
+            severity: 'warning',
+            title: 'Low System Memory',
+            description: `Only ${server.memory_free_mb} MB of system RAM remains free.`,
+            action_link: null
+        });
+    }
 
     // ══════════════════════════════════════════════════════════════════════════
     // 2. DATABASE — real queries only
@@ -272,7 +293,7 @@ exports.getSystemHealth = async (req, res) => {
         subscriptions = { active: 0, grace: 0, restricted: 0, locked: 0, due_soon_count: 0, expired_count: 0 };
 
         for (const s of subRows) {
-            const eff = resolveEffectiveStatus(s);
+            const eff = resolveEffectiveSubscriptionStatus(s);
             subscriptions[eff] = (subscriptions[eff] || 0) + 1;
             if (eff === 'active' && s.subscription_end_date) {
                 const dl = Math.ceil((new Date(s.subscription_end_date) - now) / 86400000);
@@ -325,6 +346,10 @@ exports.getSystemHealth = async (req, res) => {
         if (!backups.last_backup_at || new Date(backups.last_backup_at) < oneDayAgo) {
             setStatus('warning');
             alerts.push({ severity: 'warning', title: 'No recent backup', description: 'No backup was found in the last 24 hours.', action_link: '/super-admin/backups' });
+        }
+
+        if (backups.retention_days > 14) {
+            alerts.push({ severity: 'info', title: 'High Backup Retention', description: `Keeping backups for ${backups.retention_days} days may consume significant disk space.`, action_link: '/super-admin/platform-settings' });
         }
     }
 
@@ -388,8 +413,7 @@ exports.getSystemHealth = async (req, res) => {
             delayed_over_20min: Number(kotDelayed.cnt) || 0,
         };
         if (operations.kot.delayed_over_20min > 0) {
-            setStatus('warning');
-            alerts.push({ severity: 'warning', title: `${operations.kot.delayed_over_20min} KOT(s) delayed`, description: 'Some kitchen orders have been pending/preparing for over 20 minutes.', action_link: '/kitchen' });
+            alerts.push({ severity: 'info', title: `${operations.kot.delayed_over_20min} KOT(s) delayed`, description: 'Some kitchen orders have been pending/preparing for over 20 minutes.', action_link: '/kitchen' });
         }
     }
 
@@ -405,8 +429,7 @@ exports.getSystemHealth = async (req, res) => {
             older_than_4h: Number(heldOld.cnt) || 0,
         };
         if (operations.held_bills.older_than_4h > 0) {
-            setStatus('warning');
-            alerts.push({ severity: 'warning', title: `${operations.held_bills.older_than_4h} held bill(s) stale`, description: 'Held bills older than 4 hours may need attention.', action_link: '/held-bills' });
+            alerts.push({ severity: 'info', title: `${operations.held_bills.older_than_4h} held bill(s) stale`, description: 'Held bills older than 4 hours may need attention.', action_link: '/held-bills' });
         }
     }
 
@@ -488,3 +511,4 @@ exports.getSystemHealth = async (req, res) => {
         },
     });
 };
+

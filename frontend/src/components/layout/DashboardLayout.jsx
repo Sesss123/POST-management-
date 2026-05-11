@@ -83,7 +83,7 @@ const DashboardLayout = () => {
                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user?.role}</p>
                 </div>
                 <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-indigo-50 border-2 border-indigo-100 flex items-center justify-center text-indigo-600 font-black text-xs lg:text-sm">
-                    {user?.name?.charAt(0).toUpperCase()}
+                    {(user?.name?.[0] || 'U').toUpperCase()}
                 </div>
             </div>
           </div>

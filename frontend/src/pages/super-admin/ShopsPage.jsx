@@ -8,10 +8,11 @@ import {
   Shield, 
   AlertTriangle,
   ArrowUpRight,
-  Filter
+  Filter,
+  List
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import apiClient from '../../api/apiClient';
+import { superAdminApi } from '../../api/api';
 import { cn } from '../../utils/cn';
 
 const ShopsPage = () => {
@@ -25,7 +26,7 @@ const ShopsPage = () => {
 
   const fetchShops = async () => {
     try {
-      const { data } = await apiClient.get('/super-admin/shops');
+      const { data } = await superAdminApi.getShops();
       if (data.success) {
         setShops(data.data);
       }
@@ -140,7 +141,7 @@ const ShopsPage = () => {
                     </div>
                   </td>
                   <td className="px-8 py-6 text-sm text-slate-400">
-                    {new Date(shop.created_at).toLocaleDateString()}
+                    {shop.created_at ? new Date(shop.created_at).toLocaleDateString() : 'N/A'}
                   </td>
                   <td className="px-8 py-6 text-right">
                     <div className="flex items-center justify-end gap-2">

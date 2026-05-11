@@ -102,7 +102,7 @@ exports.allocatePaymentOldestFirst = async (connection, { customerId, paymentId,
          FROM invoices 
          WHERE customer_id = ? AND payment_status IN ('unpaid', 'partial') 
          AND balance_amount > 0
-         ORDER BY created_at ASC, id ASC`,
+         ORDER BY created_at ASC, id ASC FOR UPDATE`,
         [customerId]
     );
 

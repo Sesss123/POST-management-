@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { API_BASE_URL } from './config';
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api',
+  baseURL: `${API_BASE_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -25,18 +26,35 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    // 1. Handle Authentication Errors (401)
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       
-      // Avoid redirection loops if already on login page or if it's the login request itself
       const isLoginRequest = error.config.url.includes('/auth/login');
       const isLoginPage = window.location.pathname.includes('/login');
       
       if (!isLoginRequest && !isLoginPage) {
-        window.location.href = '/login';
+        window.location.href = '/login?expired=true';
       }
     }
+
+    // 2. Handle Subscription/Permission Errors (403)
+    if (error.response && error.response.status === 403) {
+      // Check if it's a subscription lock message
+      const message = error.response.data?.message?.toLowerCase() || '';
+      if (message.includes('subscription') || message.includes('plan')) {
+        // Redirect to a subscription status page or show a non-intrusive lock
+        console.warn('Subscription lock detected');
+        // window.location.href = '/settings?tab=subscription&locked=true';
+      }
+    }
+
+    // 3. Handle Network/Server Errors
+    if (!error.response) {
+      console.error('Network Error: Please check if the backend is running.');
+    }
+
     return Promise.reject(error);
   }
 );

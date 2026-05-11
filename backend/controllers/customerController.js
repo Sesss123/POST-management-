@@ -1,5 +1,6 @@
 const { db } = require('../config/db');
 const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
+const { encrypt, decrypt } = require('../utils/cryptoVault');
 
 // @desc    Get all customers
 // @route   GET /api/customers
@@ -47,7 +48,14 @@ exports.getDebtors = async (req, res) => {
 exports.getCustomers = async (req, res) => {
     try {
         const [customers] = await db.query('SELECT * FROM customers WHERE shop_id = ? ORDER BY name ASC', [req.shopId]);
-        res.json({ success: true, data: customers });
+        
+        // Decrypt NIC if present
+        const decryptedCustomers = customers.map(c => ({
+            ...c,
+            nic: c.nic ? decrypt(c.nic) : null
+        }));
+        
+        res.json({ success: true, data: decryptedCustomers });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -77,7 +85,7 @@ exports.createCustomer = async (req, res) => {
         // 2. Insert customer
         const [result] = await connection.query(
             'INSERT INTO customers (uuid, name, phone, address, nic, credit_limit, current_balance, loyalty_enabled, status, shop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [uuid, name, phone, address, nic, limit, initialBalance, loyalty_enabled, status, req.shopId]
+            [uuid, name, phone, address, nic ? encrypt(nic) : null, limit, initialBalance, loyalty_enabled, status, req.shopId]
         );
         const customerId = result.insertId;
 
@@ -119,7 +127,7 @@ exports.updateCustomer = async (req, res) => {
 
         await db.query(
             'UPDATE customers SET name = ?, phone = ?, address = ?, nic = ?, credit_limit = ?, loyalty_enabled = ? WHERE id = ? AND shop_id = ?',
-            [name, phone, address, nic, parseFloat(credit_limit) || 0, loyalty_enabled !== false, customerId, req.shopId]
+            [name, phone, address, nic ? encrypt(nic) : null, parseFloat(credit_limit) || 0, loyalty_enabled !== false, customerId, req.shopId]
         );
 
         const { logAction } = require('../utils/logger');
@@ -144,7 +152,10 @@ exports.getCustomerLedger = async (req, res) => {
         // 1. Get customer details
         const [customers] = await db.query(`SELECT c.*, (c.credit_limit - c.current_balance) as remaining_credit FROM customers c WHERE ${where.query} AND c.shop_id = ?`, [where.value, req.shopId]);
         if (customers.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
-        const customer = customers[0];
+        const customer = {
+            ...customers[0],
+            nic: customers[0].nic ? decrypt(customers[0].nic) : null
+        };
         const customerId = customer.id;
 
         // 2. Get ledger entries

@@ -10,6 +10,8 @@ import { cn } from '../utils/cn';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../components/common/LanguageSwitcher';
 
+import { API_BASE_URL } from '../api/config';
+
 const PublicMenuPage = () => {
     const { t, i18n } = useTranslation();
     const { tableNo, shopIdentifier } = useParams();
@@ -25,9 +27,8 @@ const PublicMenuPage = () => {
 
     const fetchMenu = async () => {
         try {
-            const baseUrl = window.location.origin.includes('5173') ? 'http://localhost:5000' : '';
             const slug = shopIdentifier || 'default';
-            const res = await axios.get(`${baseUrl}/api/public-menu/${slug}/table/${tableNo || 'walk-in'}`);
+            const res = await axios.get(`${API_BASE_URL}/api/public-menu/${slug}/table/${tableNo || 'walk-in'}`);
             setMenuData(res.data.data);
             setLoading(false);
         } catch (err) {

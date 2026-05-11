@@ -13,7 +13,7 @@ import {
   Settings,
   AlertTriangle
 } from 'lucide-react';
-import api from '../../api/apiClient';
+import { superAdminApi } from '../../api/api';
 import { useToast } from '../../components/ui/Feedback';
 import { cn } from '../../utils/cn';
 
@@ -32,8 +32,8 @@ const SuperAdminBackupsPage = () => {
     try {
       setLoading(true);
       const [logsRes, settingsRes] = await Promise.all([
-        api.get('/super-admin/backups'),
-        api.get('/super-admin/platform-settings')
+        superAdminApi.getBackups(),
+        superAdminApi.getPlatformSettings()
       ]);
       
       if (logsRes.data.success) setBackups(logsRes.data.data);
@@ -48,7 +48,7 @@ const SuperAdminBackupsPage = () => {
   const handleTriggerBackup = async () => {
     try {
       setRunning(true);
-      const res = await api.post('/super-admin/backups/run');
+      const res = await superAdminApi.runBackup();
       if (res.data.success) {
         showToast('Manual backup completed successfully', 'success');
         fetchData();

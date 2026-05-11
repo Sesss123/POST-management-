@@ -30,13 +30,14 @@ const SuperAdminLayout = () => {
     { label: 'Analytics', path: '/super-admin/analytics', icon: Activity },
     { label: 'Manage Shops', path: '/super-admin/shops', icon: Store },
     { label: 'Subscriptions', path: '/super-admin/subscriptions', icon: CreditCard },
-    { label: 'Payments', path: '/super-admin/subscription-payments', icon: Activity },
+    { label: 'Payments', path: '/super-admin/subscription-payments', icon: CreditCard },
     { label: 'Pricing Plans', path: '/super-admin/plans', icon: Layers },
     { label: 'Broadcasts', path: '/super-admin/announcements', icon: Megaphone },
     { label: 'Support Tickets', path: '/super-admin/tickets', icon: MessageSquare },
     { label: 'Platform Users', path: '/super-admin/users', icon: Users },
     { label: 'System Health', path: '/super-admin/system-health', icon: HeartPulse },
-    { label: 'Audit Logs', path: '/super-admin/audit-logs', icon: ShieldCheck },
+    { label: 'Security Center', path: '/super-admin/security', icon: ShieldCheck },
+    { label: 'Audit Logs', path: '/super-admin/audit-logs', icon: Database },
     { label: 'Backups', path: '/super-admin/backups', icon: Database },
     { label: 'Settings', path: '/super-admin/settings', icon: Settings },
   ];
@@ -62,30 +63,30 @@ const SuperAdminLayout = () => {
           </div>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1">
+        <nav className="flex-1 px-4 space-y-0.5 overflow-y-auto custom-scrollbar pb-10">
           {menuItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
               end={item.path === '/super-admin'}
               className={({ isActive }) => cn(
-                "flex items-center gap-4 px-6 py-4 rounded-2xl text-sm font-bold transition-all group",
+                "flex items-center gap-4 px-5 py-3 rounded-2xl text-xs font-bold transition-all group",
                 isActive 
                   ? "bg-indigo-600 text-white shadow-xl shadow-indigo-900/50" 
                   : "text-slate-400 hover:text-white hover:bg-white/5"
               )}
             >
-              <item.icon size={20} />
+              <item.icon size={18} />
               {item.label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="p-6">
-          <div className="bg-white/5 rounded-3xl p-6 border border-white/5">
+        <div className="p-6 mt-auto border-t border-white/5 bg-slate-900">
+          <div className="bg-slate-800/40 backdrop-blur-md rounded-3xl p-6 border border-white/5">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-black border border-indigo-500/10">
-                {user?.name?.charAt(0).toUpperCase()}
+                {(user?.name?.[0] || 'U').toUpperCase()}
               </div>
               <div className="overflow-hidden">
                 <p className="text-sm font-bold text-white truncate">{user?.name}</p>

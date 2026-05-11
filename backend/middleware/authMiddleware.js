@@ -9,10 +9,18 @@ const protect = async (req, res, next) => {
             token = req.headers.authorization.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             
+            // Check Token Version for Revocation (Fix 6)
+            if (decoded.token_version !== undefined) {
+                const [users] = await db.query('SELECT token_version FROM users WHERE id = ?', [decoded.id]);
+                if (users.length === 0 || users[0].token_version !== decoded.token_version) {
+                    return res.status(401).json({ success: false, message: 'Session revoked. Please login again.' });
+                }
+            }
+
             req.user = decoded;
             next();
         } catch (error) {
-            console.error(error);
+            console.error('[AUTH MIDDLEWARE] Token verification failed:', error.message);
             res.status(401).json({ success: false, message: 'Not authorized, token failed' });
         }
     }

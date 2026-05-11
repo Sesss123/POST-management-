@@ -1,241 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { db } = require('../config/db');
 const { generateUuid } = require('../utils/identifier');
 const bcrypt = require('bcryptjs');
 const subscriptionService = require('../services/subscriptionService');
 
-// ─── System Health ─────────────────────────────────────────────────────────────
-
-/**
- * GET /api/super-admin/system-health
- * Returns real platform health data. Never exposes secrets.
- */
-exports.getSystemHealth = async (req, res) => {
-    const now = new Date();
-    const alerts = [];
-
-    // ── 1. Server — all from Node.js process object ──────────────────────────
-    const memRaw = process.memoryUsage();
-    const server = {
-        status: 'online',
-        uptime_seconds: Math.floor(process.uptime()),
-        node_version: process.version,
-        environment: process.env.NODE_ENV || 'development',
-        platform: process.platform,
-        // memory_total_mb: null — Node has no safe cross-platform total RAM API
-        memory_used_mb: Math.round(memRaw.rss / 1024 / 1024),
-        memory_total_mb: null,
-        memory_heap_used_mb: Math.round(memRaw.heapUsed / 1024 / 1024),
-        memory_heap_total_mb: Math.round(memRaw.heapTotal / 1024 / 1024),
-    };
-
-    // ── 2. Database — real query ──────────────────────────────────────────────
-    let database = {
-        status: 'disconnected',
-        database_name: null,
-        table_count: 0,
-        last_check: now.toISOString(),
-    };
-
-    try {
-        const [[dbNameRow]] = await db.query('SELECT DATABASE() AS db_name');
-        const [tables] = await db.query('SHOW TABLES');
-        database = {
-            status: 'connected',
-            database_name: dbNameRow.db_name,
-            table_count: tables.length,
-            last_check: now.toISOString(),
-        };
-    } catch (err) {
-        alerts.push({
-            type: 'critical',
-            title: 'Database connection failed',
-            description: 'The system could not connect to MySQL.'
-        });
-    }
-
-    // ── 3. Shops — real COUNT queries ────────────────────────────────────────
-    let shops = { total: 0, active: 0, inactive: 0, suspended: 0 };
-
-    try {
-        const [[counts]] = await db.query(`
-            SELECT
-                COUNT(*) as total,
-                SUM(status = 'active') as active_count,
-                SUM(status = 'inactive') as inactive_count,
-                SUM(status = 'suspended') as suspended_count
-            FROM shops
-        `);
-        shops = {
-            total:     counts.total     || 0,
-            active:    counts.active_count    || 0,
-            inactive:  counts.inactive_count  || 0,
-            suspended: counts.suspended_count || 0,
-        };
-    } catch (err) {
-        alerts.push({
-            type: 'warning',
-            title: 'Shops table not found',
-            description: 'Could not read shop status data.'
-        });
-    }
-
-    // ── 4. Subscriptions — real counts, no arrays ─────────────────────────────
-    let subscriptions = {
-        active: 0, grace: 0, restricted: 0, locked: 0,
-        due_soon_count: 0, expired_count: 0,
-    };
-
-    try {
-        const [subRows] = await db.query(
-            `SELECT subscription_status, subscription_end_date, grace_until FROM shops`
-        );
-
-        for (const s of subRows) {
-            const eff = subscriptionService.resolveEffectiveSubscriptionStatus(s);
-            if (eff === 'active' || eff === 'trial') subscriptions.active++;
-            else if (eff === 'grace')      subscriptions.grace++;
-            else if (eff === 'restricted') subscriptions.restricted++;
-            else if (eff === 'locked')     subscriptions.locked++;
-
-            // due_soon: active but expiring within 7 days
-            if (eff === 'active' && s.subscription_end_date) {
-                const daysLeft = Math.ceil((new Date(s.subscription_end_date) - now) / 86400000);
-                if (daysLeft >= 0 && daysLeft <= 7) subscriptions.due_soon_count++;
-            }
-            // expired: past end_date (grace + restricted + locked)
-            if (eff !== 'active' && s.subscription_end_date && new Date(s.subscription_end_date) < now) {
-                subscriptions.expired_count++;
-            }
-        }
-
-        if (subscriptions.restricted > 0 || subscriptions.locked > 0) {
-            alerts.push({
-                type: 'warning',
-                title: 'Subscription issues detected',
-                description: `${subscriptions.restricted} shop(s) restricted, ${subscriptions.locked} shop(s) locked.`
-            });
-        }
-        if (subscriptions.due_soon_count > 0) {
-            alerts.push({
-                type: 'warning',
-                title: `${subscriptions.due_soon_count} subscription(s) expiring within 7 days`,
-                description: 'Notify these shop owners to renew soon.'
-            });
-        }
-    } catch (err) {
-        alerts.push({
-            type: 'warning',
-            title: 'Subscription fields not available',
-            description: 'Could not read subscription status from shops table.'
-        });
-    }
-
-    // ── 5. Backups — from backup_logs table ───────────────────────────────────
-    let backups = {
-        enabled: process.env.BACKUP_ENABLED === 'true',
-        last_backup_at: null,
-        last_backup_status: 'not_available',
-        backup_count: 0,
-        retention_days: parseInt(process.env.BACKUP_RETENTION_DAYS || '14', 10),
-    };
-
-    try {
-        const [[countRow]] = await db.query('SELECT COUNT(*) as cnt FROM backup_logs');
-        backups.backup_count = Number(countRow.cnt) || 0;
-
-        const [lastRow] = await db.query(
-            'SELECT created_at, status FROM backup_logs ORDER BY created_at DESC LIMIT 1'
-        );
-        if (lastRow.length > 0) {
-            backups.last_backup_at = lastRow[0].created_at;
-            backups.last_backup_status = lastRow[0].status || 'unknown';
-        }
-
-        const oneDayAgo = new Date(now.getTime() - 86400000);
-        if (!backups.last_backup_at || new Date(backups.last_backup_at) < oneDayAgo) {
-            alerts.push({
-                type: 'warning',
-                title: 'No recent backup found',
-                description: 'No successful backup was found in the last 24 hours.'
-            });
-        }
-    } catch (err) {
-        backups.last_backup_status = 'not_available';
-        alerts.push({
-            type: 'info',
-            title: 'Backup logs table not found',
-            description: 'The backup_logs table does not exist or could not be read.'
-        });
-    }
-
-    // ── 6. Security — from audit_logs ─────────────────────────────────────────
-    let security = {
-        failed_logins_24h: 0,
-        unauthorized_attempts_24h: 0,
-        audit_logs_today: 0,
-    };
-
-    try {
-        const oneDayAgo = new Date(now.getTime() - 86400000);
-        const todayStart = new Date(now);
-        todayStart.setHours(0, 0, 0, 0);
-
-        const [[failedLogins]] = await db.query(
-            `SELECT COUNT(*) as cnt FROM audit_logs WHERE action = 'login_failed' AND created_at >= ?`,
-            [oneDayAgo]
-        );
-        const [[unauthorized]] = await db.query(
-            `SELECT COUNT(*) as cnt FROM audit_logs WHERE action = 'unauthorized_access_attempt' AND created_at >= ?`,
-            [oneDayAgo]
-        );
-        const [[logsToday]] = await db.query(
-            `SELECT COUNT(*) as cnt FROM audit_logs WHERE created_at >= ?`,
-            [todayStart]
-        );
-
-        security.failed_logins_24h         = Number(failedLogins.cnt)  || 0;
-        security.unauthorized_attempts_24h  = Number(unauthorized.cnt) || 0;
-        security.audit_logs_today           = Number(logsToday.cnt)    || 0;
-
-        if (security.failed_logins_24h > 10) {
-            alerts.push({
-                type: 'warning',
-                title: 'High failed login attempts',
-                description: `${security.failed_logins_24h} failed login attempts detected in the last 24 hours.`
-            });
-        }
-        if (security.unauthorized_attempts_24h > 5) {
-            alerts.push({
-                type: 'critical',
-                title: 'Multiple unauthorized access attempts',
-                description: `${security.unauthorized_attempts_24h} unauthorized route access attempts in the last 24 hours.`
-            });
-        }
-    } catch (err) {
-        alerts.push({
-            type: 'info',
-            title: 'Audit logs table not found',
-            description: 'The audit_logs table does not exist or could not be read.'
-        });
-    }
-
-    return res.json({
-        success: true,
-        data: {
-            server,
-            database,
-            shops,
-            subscriptions,
-            backups,
-            security,
-            alerts,
-            generated_at: now.toISOString(),
-        }
-    });
-};
-
+// getSystemHealth and getHealth removed. Using systemHealthController instead.
 
 // ─── Platform Stats ─────────────────────────────────────────────────────────
 
@@ -244,10 +15,35 @@ exports.getStats = async (req, res) => {
         const [shopsCount] = await db.query('SELECT COUNT(*) as count FROM shops');
         const [usersCount] = await db.query('SELECT COUNT(*) as count FROM users');
         const [revenue] = await db.query('SELECT SUM(grand_total) as total FROM invoices WHERE payment_status != "cancelled"');
-        const [recentShops] = await db.query('SELECT * FROM shops ORDER BY created_at DESC LIMIT 5');
+        const [recentShops] = await db.query('SELECT name, identifier, subscription_status, created_at FROM shops ORDER BY created_at DESC LIMIT 5');
+
+        // New shops trends
+        const [[newShopsThisMonth]] = await db.query('SELECT COUNT(*) as count FROM shops WHERE created_at >= DATE_FORMAT(CURDATE(), "%Y-%m-01")');
+        const [[newShopsLastMonth]] = await db.query(`
+            SELECT COUNT(*) as count FROM shops 
+            WHERE created_at >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), "%Y-%m-01") 
+            AND created_at < DATE_FORMAT(CURDATE(), "%Y-%m-01")
+        `);
+        
+        // Revenue trends (from subscription payments)
+        const [[revThisMonth]] = await db.query('SELECT SUM(amount) as total FROM subscription_payments WHERE created_at >= DATE_FORMAT(CURDATE(), "%Y-%m-01")');
+        const [[revLastMonth]] = await db.query(`
+            SELECT SUM(amount) as total FROM subscription_payments 
+            WHERE created_at >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), "%Y-%m-01") 
+            AND created_at < DATE_FORMAT(CURDATE(), "%Y-%m-01")
+        `);
+
+        // Security telemetry (last 24h)
+        const [[securityStats]] = await db.query(`
+            SELECT 
+                SUM(action = 'login_failed') as failed_logins,
+                SUM(action = 'unauthorized_access') as unauthorized_attempts
+            FROM audit_logs 
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        `);
 
         // Subscription health
-        const [subStats] = await db.query(`
+        const [[subStats]] = await db.query(`
             SELECT 
                 SUM(subscription_status = 'active') as active_count,
                 SUM(subscription_status = 'grace') as grace_count,
@@ -256,14 +52,39 @@ exports.getStats = async (req, res) => {
             FROM shops
         `);
 
+        // Basic Server Health
+        const memRaw = process.memoryUsage();
+        const serverHealth = {
+            status: 'online',
+            uptime_seconds: Math.floor(process.uptime()),
+            memory_used_mb: Math.round(memRaw.rss / 1024 / 1024),
+            memory_total_mb: Math.round(os.totalmem() / 1024 / 1024),
+            db_status: 'connected'
+        };
+
         res.json({
             success: true,
             data: {
-                shops_count: shopsCount[0].count,
+                shops: {
+                    total: shopsCount[0].count,
+                    new_this_month: newShopsThisMonth.count || 0,
+                    new_last_month: newShopsLastMonth.count || 0,
+                    growth_delta: (newShopsThisMonth.count || 0) - (newShopsLastMonth.count || 0)
+                },
                 users_count: usersCount[0].count,
-                total_revenue: revenue[0].total || 0,
+                total_platform_revenue: revenue[0].total || 0,
+                revenue_trends: {
+                    this_month: parseFloat(revThisMonth.total) || 0,
+                    last_month: parseFloat(revLastMonth.total) || 0,
+                    delta: (parseFloat(revThisMonth.total) || 0) - (parseFloat(revLastMonth.total) || 0)
+                },
+                security: {
+                    failed_logins_24h: securityStats.failed_logins || 0,
+                    unauthorized_attempts_24h: securityStats.unauthorized_attempts || 0
+                },
                 recent_shops: recentShops,
-                subscription_health: subStats[0]
+                subscription_health: subStats,
+                server_health: serverHealth
             }
         });
     } catch (error) {
@@ -345,19 +166,22 @@ exports.getAnalytics = async (req, res) => {
                 SUM(status = 'active') as active
             FROM shops
         `);
-        const healthScore = healthRow.total > 0 ? (healthRow.active / healthRow.total) * 100 : 0;
+        const mrrValue = (mrrRow && mrrRow.mrr) ? mrrRow.mrr : 0;
+        const totalShops = healthRow ? healthRow.total : 0;
+        const activeShops = healthRow ? healthRow.active : 0;
+        const healthScore = totalShops > 0 ? (activeShops / totalShops) * 100 : 0;
 
         res.json({
             success: true,
             data: {
-                status_distribution: statusDist,
-                mrr: mrrRow.mrr || 0,
-                payment_trend: paymentTrend,
-                shop_trend: shopTrend,
-                top_shops: topShops,
+                status_distribution: statusDist || [],
+                mrr: mrrValue,
+                payment_trend: paymentTrend || [],
+                shop_trend: shopTrend || [],
+                top_shops: topShops || [],
                 health_score: Math.round(healthScore),
-                total_shops: healthRow.total,
-                active_shops: healthRow.active
+                total_shops: totalShops,
+                active_shops: activeShops
             }
         });
     } catch (error) {
@@ -403,7 +227,7 @@ exports.getShops = async (req, res) => {
         // Compute effective status for each shop
         const enriched = shops.map(shop => ({
             ...shop,
-            effective_subscription_status: resolveEffectiveStatus(shop)
+            effective_subscription_status: subscriptionService.resolveEffectiveSubscriptionStatus(shop)
         }));
 
         res.json({ success: true, data: enriched });
@@ -426,7 +250,7 @@ exports.getShopById = async (req, res) => {
         }
 
         const shop = shops[0];
-        shop.effective_subscription_status = resolveEffectiveStatus(shop);
+        shop.effective_subscription_status = subscriptionService.resolveEffectiveSubscriptionStatus(shop);
 
         res.json({ success: true, data: shop });
     } catch (error) {
@@ -603,13 +427,14 @@ exports.createShopAdmin = async (req, res) => {
             [uuid, name, email, hashedPassword, shopId]
         );
 
-        // Audit Log
-        await db.query(
-            'INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [req.user.id, 'shop_admin_created', 'user', null, `Created admin ${email} for shop ${shopId}`, req.ip, req.headers['user-agent']]
-        );
+        // Get shop name for welcome email
+        const [[shop]] = await db.query('SELECT name FROM shops WHERE id = ?', [shopId]);
 
-        res.status(201).json({ success: true, message: 'Shop admin created' });
+        // Send Welcome Email
+        const notificationService = require('../services/notificationService');
+        await notificationService.sendWelcomeEmail(email, shop.name, name);
+
+        res.status(201).json({ success: true, message: 'Shop admin created and Welcome Email sent.' });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -673,7 +498,31 @@ exports.getShops = async (req, res) => {
 exports.recordPayment = async (req, res) => {
     try {
         const result = await subscriptionService.markPaymentReceived(req.params.id, req.body, req.user.id);
-        res.json({ success: true, message: 'Payment recorded successfully', data: result });
+
+        // Send Receipt Email
+        try {
+            const [[shopInfo]] = await db.query(`
+                SELECT s.name, u.email, s.subscription_plan, s.subscription_end_date 
+                FROM shops s 
+                JOIN users u ON s.id = u.shop_id 
+                WHERE s.id = ? AND u.role = 'admin'
+            `, [req.params.id]);
+
+            if (shopInfo) {
+                const notificationService = require('../services/notificationService');
+                await notificationService.sendPaymentReceipt(
+                    shopInfo.email,
+                    shopInfo.name,
+                    req.body.amount,
+                    shopInfo.subscription_plan,
+                    shopInfo.subscription_end_date
+                );
+            }
+        } catch (emailErr) {
+            console.error('Failed to send receipt email:', emailErr);
+        }
+
+        res.json({ success: true, message: 'Payment recorded and Receipt Email sent.', data: result });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: error.message || 'Server error' });
@@ -1035,6 +884,10 @@ exports.updatePlatformSettings = async (req, res) => {
             [req.user.id, 'platform_settings_updated', 'system', null, 'Updated platform settings', req.ip, req.headers['user-agent']]
         );
 
+        // Refresh security cache
+        const securitySettingsService = require('../services/securitySettingsService');
+        await securitySettingsService.refresh();
+
         res.json({ success: true, message: 'Settings updated successfully' });
     } catch (error) {
         console.error(error);
@@ -1131,19 +984,91 @@ exports.cloneShopMenu = async (req, res) => {
     }
 };
 
-exports.getHealth = async (req, res) => {
+// getHealth removed. using systemHealthController.getSystemHealth
+
+/**
+ * GET /api/super-admin/security
+ * Returns real security metrics, rate limiting status, and suspicious activity logs.
+ */
+exports.getSecurityMetrics = async (req, res) => {
     try {
-        await db.query('SELECT 1');
+        const interval = '1 DAY';
+
+        // 1. Rate Limit Configuration (Real-time from service)
+        const securitySettingsService = require('../services/securitySettingsService');
+        const rateLimits = {
+            auth: { enabled: true, limit: securitySettingsService.get('security_auth_limit') || 10, window_minutes: 15 },
+            general_api: { enabled: true, limit: securitySettingsService.get('security_general_limit') || 1000, window_minutes: 15 },
+            public_menu: { enabled: true, limit: securitySettingsService.get('security_public_limit') || 300, window_minutes: 15 },
+            payment_status: { enabled: true, limit: securitySettingsService.get('security_payment_limit') || 120, window_minutes: 5 },
+            super_admin: { enabled: true, limit: securitySettingsService.get('security_super_admin_limit') || 300, window_minutes: 15 }
+        };
+
+        // 2. Security Event Counts (Last 24h)
+        const [[failedLogins]] = await db.query(
+            `SELECT COUNT(*) as count FROM audit_logs WHERE action = 'login_failed' AND created_at >= NOW() - INTERVAL ${interval}`
+        );
+        const [[unauthorized]] = await db.query(
+            `SELECT COUNT(*) as count FROM audit_logs WHERE action = 'unauthorized_access_attempt' AND created_at >= NOW() - INTERVAL ${interval}`
+        );
+        const [[rateLimited]] = await db.query(
+            `SELECT COUNT(*) as count FROM audit_logs WHERE action LIKE 'rate_limit%' AND created_at >= NOW() - INTERVAL ${interval}`
+        );
+        const [[forbidden]] = await db.query(
+            `SELECT COUNT(*) as count FROM audit_logs WHERE action = 'forbidden_api_attempt' AND created_at >= NOW() - INTERVAL ${interval}`
+        );
+
+        // 3. Top Suspicious IPs (Last 24h)
+        const [suspiciousIps] = await db.query(`
+            SELECT 
+                ip_address, 
+                COUNT(*) as event_count, 
+                MAX(created_at) as last_seen,
+                CASE 
+                    WHEN COUNT(*) > 50 THEN 'CRITICAL'
+                    WHEN COUNT(*) > 20 THEN 'HIGH'
+                    WHEN COUNT(*) > 10 THEN 'MEDIUM'
+                    ELSE 'LOW'
+                END as risk_level
+            FROM audit_logs
+            WHERE (action = 'login_failed' OR action LIKE 'rate_limit%' OR action = 'unauthorized_access_attempt')
+            AND created_at >= NOW() - INTERVAL ${interval}
+            GROUP BY ip_address
+            ORDER BY event_count DESC
+            LIMIT 10
+        `);
+
+        // 4. Recent Security Logs
+        const [recentLogs] = await db.query(`
+            SELECT 
+                al.*, 
+                u.name as user_name, 
+                s.name as shop_name 
+            FROM audit_logs al
+            LEFT JOIN users u ON al.user_id = u.id
+            LEFT JOIN shops s ON al.shop_id = s.id
+            WHERE al.entity_type = 'security' OR al.action LIKE 'rate_limit%' OR al.action IN ('login_failed', 'unauthorized_access_attempt', 'forbidden_api_attempt')
+            ORDER BY al.created_at DESC
+            LIMIT 20
+        `);
+
         res.json({
             success: true,
             data: {
-                database: 'connected',
-                uptime: process.uptime(),
-                memory: process.memoryUsage(),
-                timestamp: new Date()
+                rate_limits: rateLimits,
+                security_events: {
+                    failed_logins_24h: failedLogins.count,
+                    unauthorized_attempts_24h: unauthorized.count,
+                    rate_limited_requests_24h: rateLimited.count,
+                    forbidden_requests_24h: forbidden.count
+                },
+                top_suspicious_ips: suspiciousIps,
+                recent_security_logs: recentLogs
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'System unhealthy', error: error.message });
+        console.error('[getSecurityMetrics]', error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
+

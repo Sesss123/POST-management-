@@ -84,8 +84,8 @@ exports.createCampaign = async (req, res) => {
 
         // Update campaign final status
         await db.query(
-            'UPDATE sms_campaigns SET status = "completed", successful_sends = ?, failed_sends = ? WHERE id = ?',
-            [successCount, failCount, campaignId]
+            'UPDATE sms_campaigns SET status = "completed", successful_sends = ?, failed_sends = ? WHERE id = ? AND shop_id = ?',
+            [successCount, failCount, campaignId, req.shopId]
         );
 
     } catch (error) {

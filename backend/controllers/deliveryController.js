@@ -2,7 +2,8 @@ const { db } = require('../config/db');
 const { generateUuid } = require('../utils/identifier');
 const deliveryProviderService = require('../services/delivery/deliveryProviderService');
 const { logAction } = require('../utils/logger');
-const kotController = require('./kotController');
+const { calculateInvoiceTotals } = require('../utils/pricingCalculator');
+const { getSystemSettings } = require('../utils/settingsHelper');
 
 // @desc    Get all delivery orders
 // @route   GET /api/delivery-orders
@@ -25,9 +26,9 @@ exports.getDeliveryOrders = async (req, res) => {
 
         const [orders] = await db.query(query, params);
         
-        // Fetch items for each order (optimized later with joins if needed)
+        // Fetch items for each order
         for (let order of orders) {
-            const [items] = await db.query('SELECT * FROM delivery_order_items WHERE delivery_order_id = ?', [order.id]);
+            const [items] = await db.query('SELECT * FROM delivery_order_items WHERE delivery_order_id = ? AND shop_id = ?', [order.id, req.shopId]);
             order.items = items;
         }
 
@@ -56,8 +57,22 @@ exports.createManualOrder = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        const subtotal = items.reduce((acc, item) => acc + (item.qty * item.unit_price), 0);
-        const grandTotal = subtotal + (parseFloat(delivery_fee) || 0);
+        const settings = await getSystemSettings(connection, req.shopId);
+        
+        // Prepare items for calculator
+        const calcItems = items.map(item => ({
+            ...item,
+            total: item.qty * item.unit_price
+        }));
+
+        const totals = calculateInvoiceTotals({
+            items: calcItems,
+            settings: settings,
+            order_type: 'delivery'
+        });
+
+        const subtotal = totals.subtotal;
+        const grandTotal = totals.grand_total + (parseFloat(delivery_fee) || 0);
 
         const orderUuid = generateUuid();
         const [orderResult] = await connection.query(
@@ -73,9 +88,9 @@ exports.createManualOrder = async (req, res) => {
             const itemUuid = generateUuid();
             await connection.query(
                 `INSERT INTO delivery_order_items (
-                    uuid, delivery_order_id, item_id, item_name, qty, unit_price, total, note, matched_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [itemUuid, orderId, item.item_id || null, item.item_name, item.qty, item.unit_price, item.qty * item.unit_price, item.note || null, item.item_id ? 'matched' : 'manual']
+                    uuid, delivery_order_id, item_id, item_name, qty, unit_price, total, note, matched_status, shop_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemUuid, orderId, item.item_id || null, item.item_name, item.qty, item.unit_price, item.qty * item.unit_price, item.note || null, item.item_id ? 'matched' : 'manual', req.shopId]
             );
         }
 
@@ -84,7 +99,7 @@ exports.createManualOrder = async (req, res) => {
     } catch (error) {
         await connection.rollback();
         console.error(error);
-        res.status(500).json({ success: false, message: 'Failed to create manual order' });
+        res.status(500).json({ success: false, message: error.message || 'Failed to create manual order' });
     } finally {
         connection.release();
     }
@@ -125,14 +140,14 @@ exports.syncProviderOrders = async (req, res) => {
                         const itemUuid = generateUuid();
                         
                         // Try to match item by name
-                        const [matched] = await connection.query('SELECT id FROM items WHERE name = ? AND shop_id = ? AND status = "active"', [order.externalItemName, req.shopId]);
+                        const [matched] = await connection.query('SELECT id FROM items WHERE name = ? AND shop_id = ? AND status = "active"', [item.externalItemName, req.shopId]);
                         const itemId = matched.length > 0 ? matched[0].id : null;
 
                         await connection.query(
                             `INSERT INTO delivery_order_items (
-                                uuid, delivery_order_id, item_id, external_item_name, item_name, qty, unit_price, total, note, matched_status
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                            [itemUuid, orderId, itemId, order.externalItemName, order.externalItemName, item.qty, item.unitPrice, item.qty * item.unitPrice, item.note || null, itemId ? 'matched' : 'unmatched']
+                                uuid, delivery_order_id, item_id, external_item_name, item_name, qty, unit_price, total, note, matched_status, shop_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            [itemUuid, orderId, itemId, item.externalItemName, item.externalItemName, item.qty, item.unitPrice, item.qty * item.unitPrice, item.note || null, itemId ? 'matched' : 'unmatched', req.shopId]
                         );
                     }
 
@@ -169,14 +184,8 @@ exports.acceptOrder = async (req, res) => {
         if (order.order_status !== 'pending') throw new Error(`Order is already ${order.order_status}`);
 
         // 2. Get items
-        const [items] = await connection.query('SELECT * FROM delivery_order_items WHERE delivery_order_id = ?', [order.id]);
+        const [items] = await connection.query('SELECT * FROM delivery_order_items WHERE delivery_order_id = ? AND shop_id = ?', [order.id, req.shopId]);
         
-        // Validate items are matched or allow accepting anyway
-        const unmatched = items.filter(i => i.matched_status === 'unmatched');
-        if (unmatched.length > 0) {
-            // In a real scenario, we might force mapping, but for now we'll allow accepting if they exist as manual items in session
-        }
-
         // 3. Create a POS session for this delivery
         const sessionUuid = generateUuid();
         const sessionNo = 'DLV-' + Date.now().toString().slice(-6);
@@ -190,11 +199,6 @@ exports.acceptOrder = async (req, res) => {
         // 4. Add items to session
         for (const item of items) {
             const itemUuid = generateUuid();
-            // Note: If itemId is null, it's a manual item. Our order_items table supports itemId NULL? 
-            // Let's check schema. Usually order_items.item_id is required. 
-            // If so, we might need a dummy "External Delivery Item" or similar if unmatched.
-            // For now, I'll assume item_id can be null or we find a match.
-            
             await connection.query(
                 `INSERT INTO order_items (uuid, session_id, item_id, item_name, qty, unit_price, total, note, shop_id, created_by)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -204,8 +208,8 @@ exports.acceptOrder = async (req, res) => {
 
         // 5. Update delivery order status
         await connection.query(
-            'UPDATE delivery_orders SET order_status = "accepted", accepted_by = ?, accepted_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [req.user.id, order.id]
+            'UPDATE delivery_orders SET order_status = "accepted", accepted_by = ?, accepted_at = CURRENT_TIMESTAMP WHERE id = ? AND shop_id = ?',
+            [req.user.id, order.id, req.shopId]
         );
 
         // 6. Acknowledge to provider if external
@@ -238,8 +242,8 @@ exports.rejectOrder = async (req, res) => {
         const order = orders[0];
 
         await db.query(
-            'UPDATE delivery_orders SET order_status = "rejected", rejected_by = ?, rejected_at = CURRENT_TIMESTAMP, reject_reason = ? WHERE id = ?',
-            [req.user.id, order.id, reason]
+            'UPDATE delivery_orders SET order_status = "rejected", rejected_by = ?, rejected_at = CURRENT_TIMESTAMP, reject_reason = ? WHERE id = ? AND shop_id = ?',
+            [req.user.id, order.id, reason, req.shopId]
         );
 
         if (order.external_order_id) {
@@ -270,7 +274,7 @@ exports.updateStatus = async (req, res) => {
         if (orders.length === 0) return res.status(404).json({ success: false, message: 'Order not found' });
         const order = orders[0];
 
-        await db.query('UPDATE delivery_orders SET order_status = ? WHERE id = ?', [status, order.id]);
+        await db.query('UPDATE delivery_orders SET order_status = ? WHERE id = ? AND shop_id = ?', [status, order.id, req.shopId]);
 
         if (order.external_order_id) {
             await deliveryProviderService.updateStatus(order.source, order.external_order_id, status);
@@ -284,3 +288,4 @@ exports.updateStatus = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error' });
     }
 };
+

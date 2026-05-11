@@ -11,7 +11,8 @@ const validateEnv = () => {
         'DB_PASSWORD',
         'DB_NAME',
         'JWT_SECRET',
-        'JWT_EXPIRES_IN'
+        'JWT_EXPIRES_IN',
+        'DATA_ENCRYPTION_KEY'
     ];
 
     const missing = [];

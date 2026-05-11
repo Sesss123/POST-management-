@@ -28,7 +28,7 @@ import {
   StatCard
 } from '../components/ui';
 import { cn } from '../utils/cn';
-import axios from 'axios';
+import apiClient from '../api/apiClient';
 
 const DeliveryOrdersPage = () => {
   const toast = useToast();
@@ -47,10 +47,7 @@ const DeliveryOrdersPage = () => {
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const { data } = await axios.get('/api/delivery-orders', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const { data } = await apiClient.get('/delivery-orders');
       setOrders(data.data);
     } catch (err) {
       toast.error('Failed to load delivery orders');
@@ -61,10 +58,7 @@ const DeliveryOrdersPage = () => {
 
   const fetchItems = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const { data } = await axios.get('/api/items', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const { data } = await apiClient.get('/items');
       setItems(data.data);
     } catch (err) {}
   };
@@ -72,10 +66,7 @@ const DeliveryOrdersPage = () => {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const token = localStorage.getItem('token');
-      await axios.post('/api/delivery-orders/sync-provider', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.post('/delivery-orders/sync-provider');
       toast.success('Orders synced successfully');
       fetchOrders();
     } catch (err) {
@@ -87,10 +78,7 @@ const DeliveryOrdersPage = () => {
 
   const handleAccept = async (orderId) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(`/api/delivery-orders/${orderId}/accept`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.post(`/delivery-orders/${orderId}/accept`);
       toast.success('Order accepted and sent to POS');
       fetchOrders();
     } catch (err) {
@@ -102,10 +90,7 @@ const DeliveryOrdersPage = () => {
     const reason = window.prompt('Reason for rejection:');
     if (!reason) return;
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(`/api/delivery-orders/${orderId}/reject`, { reason }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.post(`/delivery-orders/${orderId}/reject`, { reason });
       toast.success('Order rejected');
       fetchOrders();
     } catch (err) {
@@ -115,10 +100,7 @@ const DeliveryOrdersPage = () => {
 
   const handleUpdateStatus = async (orderId, status) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`/api/delivery-orders/${orderId}/status`, { status }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.patch(`/delivery-orders/${orderId}/status`, { status });
       toast.success(`Order marked as ${status}`);
       fetchOrders();
     } catch (err) {

@@ -8,7 +8,11 @@ const { db } = require('../config/db');
 const maskSensitiveData = (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
     
-    const sensitiveKeys = ['password', 'token', 'secret', 'api_key', 'jwt', 'db_password', 'credit_card', 'otp'];
+    const sensitiveKeys = [
+        'password', 'token', 'secret', 'api_key', 'jwt', 'db_password', 
+        'credit_card', 'card_number', 'cvv', 'pin', 'bank_account', 
+        'account_number', 'encryption_key', 'otp'
+    ];
     const maskedObj = Array.isArray(obj) ? [...obj] : { ...obj };
     
     for (const key in maskedObj) {
@@ -29,6 +33,7 @@ const maskSensitiveData = (obj) => {
  */
 const logAudit = async (connectionOrPool, {
     userId,
+    shopId = null,
     action,
     entityType,
     entityId = null,
@@ -41,12 +46,13 @@ const logAudit = async (connectionOrPool, {
         const conn = connectionOrPool || db;
         
         const sql = `
-            INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_value, new_value, ip_address, user_agent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO audit_logs (user_id, shop_id, action, entity_type, entity_id, old_value, new_value, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         
         const values = [
             userId || null,
+            shopId || null,
             action,
             entityType,
             entityId,

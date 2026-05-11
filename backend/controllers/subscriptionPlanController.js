@@ -6,7 +6,7 @@ const { logAction } = require('../utils/logger');
 // @access  Private/SuperAdmin
 exports.getPlans = async (req, res) => {
     try {
-        const [plans] = await db.query('SELECT * FROM subscription_plans ORDER BY price ASC');
+        const [plans] = await db.query('SELECT *, monthly_price as price FROM subscription_plans ORDER BY monthly_price ASC');
         res.json({ success: true, data: plans });
     } catch (error) {
         console.error(error);
@@ -20,9 +20,19 @@ exports.getPlans = async (req, res) => {
 exports.createPlan = async (req, res) => {
     const { name, price, billing_interval, features, is_active } = req.body;
     try {
+        const planKey = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        
         const [result] = await db.query(
-            'INSERT INTO subscription_plans (name, price, billing_interval, features, is_active) VALUES (?, ?, ?, ?, ?)',
-            [name, price, billing_interval || 'monthly', JSON.stringify(features || []), is_active !== false]
+            'INSERT INTO subscription_plans (name, plan_key, monthly_price, yearly_price, billing_interval, features, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [
+                name, 
+                planKey, 
+                price, 
+                parseFloat(price) * 10, // Default yearly is 10x monthly
+                billing_interval || 'monthly', 
+                JSON.stringify(features || []), 
+                is_active !== false
+            ]
         );
         
         await logAction(req.user.id, 'plan_created', 'subscription_plan', result.insertId, null, req.body);
@@ -45,7 +55,7 @@ exports.updatePlan = async (req, res) => {
     const { name, price, billing_interval, features, is_active } = req.body;
     try {
         await db.query(
-            'UPDATE subscription_plans SET name = ?, price = ?, billing_interval = ?, features = ?, is_active = ? WHERE id = ?',
+            'UPDATE subscription_plans SET name = ?, monthly_price = ?, billing_interval = ?, features = ?, is_active = ? WHERE id = ?',
             [name, price, billing_interval, JSON.stringify(features), is_active, req.params.id]
         );
         
@@ -63,17 +73,17 @@ exports.updatePlan = async (req, res) => {
 // @access  Private/SuperAdmin
 exports.deletePlan = async (req, res) => {
     try {
-        // Check if any shop is using this plan (simplified check by name for now)
-        const [plan] = await db.query('SELECT name FROM subscription_plans WHERE id = ?', [req.params.id]);
+        // Check if any shop is using this plan
+        const [plan] = await db.query('SELECT plan_key FROM subscription_plans WHERE id = ?', [req.params.id]);
         if (plan.length === 0) return res.status(404).json({ success: false, message: 'Plan not found' });
         
-        const [shops] = await db.query('SELECT id FROM shops WHERE subscription_plan = ?', [plan[0].name]);
+        const [shops] = await db.query('SELECT id FROM shops WHERE subscription_plan = ?', [plan[0].plan_key]);
         if (shops.length > 0) {
             return res.status(400).json({ success: false, message: 'Cannot delete plan because it is being used by shops' });
         }
 
         await db.query('DELETE FROM subscription_plans WHERE id = ?', [req.params.id]);
-        await logAction(req.user.id, 'plan_deleted', 'subscription_plan', req.params.id, null, { name: plan[0].name });
+        await logAction(req.user.id, 'plan_deleted', 'subscription_plan', req.params.id, null, { key: plan[0].plan_key });
         
         res.json({ success: true, message: 'Subscription plan deleted' });
     } catch (error) {
