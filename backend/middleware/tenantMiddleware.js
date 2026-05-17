@@ -40,7 +40,8 @@ const tenantMiddleware = async (req, res, next) => {
                 id, status, name, identifier,
                 subscription_status, subscription_plan,
                 subscription_end_date, grace_until, trial_ends_at,
-                locked_at, last_payment_date, next_billing_date
+                locked_at, last_payment_date, next_billing_date,
+                has_delivery_orders
              FROM shops 
              WHERE id = ?`,
             [req.shopId]

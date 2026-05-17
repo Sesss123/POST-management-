@@ -71,14 +71,14 @@ export const AppCard = ({ title, subtitle, icon: Icon, action, children, classNa
         {action && <div>{action}</div>}
       </div>
     )}
-    <div className={cn('p-4 sm:p-8', bodyClassName)}>
+    <div className={cn('p-4 sm:p-5', bodyClassName)}>
       {children}
     </div>
   </div>
 );
 
 // Stat Card
-export const StatCard = ({ title, value, icon: Icon, trend, variant = 'default' }) => {
+export const StatCard = ({ title, value, icon: Icon, trend, variant = 'default', onClick }) => {
   const variants = {
     default: 'bg-white text-slate-900',
     dark: 'bg-slate-900 text-white',
@@ -90,7 +90,14 @@ export const StatCard = ({ title, value, icon: Icon, trend, variant = 'default' 
   };
 
   return (
-    <div className={cn('rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 shadow-xl relative overflow-hidden group', variants[variant])}>
+    <div 
+      onClick={onClick}
+      className={cn(
+        'rounded-[24px] sm:rounded-[28px] p-4 sm:p-5 shadow-xl relative overflow-hidden group transition-all', 
+        onClick && 'cursor-pointer hover:-translate-y-1 active:scale-95 hover:shadow-2xl',
+        variants[variant]
+      )}
+    >
       <div className="relative z-10">
         <div className={cn(
           "w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center mb-3 sm:mb-4 transition-transform group-hover:scale-110",
@@ -101,14 +108,14 @@ export const StatCard = ({ title, value, icon: Icon, trend, variant = 'default' 
         <p className={cn("text-[10px] sm:text-xs font-black uppercase tracking-[0.15em] mb-1", variant === 'default' ? "text-slate-400" : "text-white/60")}>
           {title}
         </p>
-        <h2 className="text-xl sm:text-3xl font-black tracking-tight truncate">{value}</h2>
+        <h2 className="text-xl sm:text-2xl xl:text-3xl font-black tracking-tight leading-none break-all sm:break-normal">{value}</h2>
         {trend && (
           <p className={cn("mt-2 text-[10px] sm:text-xs font-bold", trend.positive ? "text-emerald-400" : "text-rose-400")}>
             {trend.label}
           </p>
         )}
       </div>
-      <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-current opacity-[0.03] rounded-full blur-3xl" />
+      <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-current opacity-[0.03] rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700" />
     </div>
   );
 };
@@ -175,7 +182,11 @@ export const Badge = ({ children, variant = 'default', className }) => {
     success: 'bg-emerald-50 text-emerald-600',
     warning: 'bg-amber-50 text-amber-600',
     danger: 'bg-rose-50 text-rose-600',
-    info: 'bg-blue-50 text-blue-600'
+    info: 'bg-blue-50 text-blue-600',
+    'solid-danger': 'bg-rose-600 text-white shadow-lg shadow-rose-900/20',
+    'solid-warning': 'bg-amber-500 text-white shadow-lg shadow-amber-900/20',
+    'solid-indigo': 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20',
+    'solid-success': 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20'
   };
 
   return (
@@ -237,9 +248,9 @@ export const AppModal = ({ isOpen, onClose, title, description, children, footer
   };
 
   return (
-    <div className="fixed top-0 left-0 w-screen h-screen z-[99999] grid place-items-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-2 sm:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className={cn(
-        "bg-white sm:rounded-[40px] shadow-2xl animate-in zoom-in-95 duration-300 w-full overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[90vh]", 
+        "bg-white rounded-[32px] sm:rounded-[40px] shadow-2xl animate-in zoom-in-95 duration-300 w-full overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]", 
         sizes[size]
       )}>
         <div className="px-6 py-4 sm:px-8 sm:py-6 border-b border-slate-50 flex items-center justify-between shrink-0">
@@ -251,11 +262,11 @@ export const AppModal = ({ isOpen, onClose, title, description, children, footer
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
-        <div className="p-6 sm:p-8 flex-1 overflow-y-auto custom-scrollbar">
+        <div className="p-4 sm:p-5 flex-1 overflow-y-auto custom-scrollbar">
           {children}
         </div>
         {footer && (
-          <div className="p-6 sm:p-8 bg-slate-50 border-t border-slate-100 shrink-0">
+          <div className="p-4 sm:p-6 bg-slate-50 border-t border-slate-100 shrink-0">
             {footer}
           </div>
         )}

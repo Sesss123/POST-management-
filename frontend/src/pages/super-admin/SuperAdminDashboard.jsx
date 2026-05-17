@@ -117,7 +117,7 @@ const SuperAdminDashboard = () => {
               <Store className="text-indigo-400" size={16} />
               Recent Onboardings
             </h2>
-            <button className="text-indigo-400 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors">View All Shops</button>
+            <Link to="/super-admin/shops" className="text-indigo-400 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors">View All Shops</Link>
           </div>
           
           <div className="bg-slate-900/50 border border-white/5 rounded-[2.5rem] overflow-hidden backdrop-blur-sm">
@@ -145,15 +145,17 @@ const SuperAdminDashboard = () => {
                     <td className="px-8 py-6">
                       <span className={cn(
                         "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                        shop.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
+                        shop.subscription_status === 'active' ? "bg-emerald-500/10 text-emerald-500" : 
+                        shop.subscription_status === 'grace' ? "bg-amber-500/10 text-amber-500" :
+                        "bg-rose-500/10 text-rose-500"
                       )}>
-                        {shop.status}
+                        {shop.subscription_status}
                       </span>
                     </td>
                     <td className="px-8 py-6 text-right">
-                      <button className="p-2 bg-white/5 hover:bg-indigo-600 hover:text-white rounded-lg text-slate-400 transition-all">
+                      <Link to={`/super-admin/shops/${shop.id}`} className="p-2 bg-white/5 hover:bg-indigo-600 hover:text-white rounded-lg text-slate-400 transition-all inline-flex items-center justify-center">
                         <ArrowUpRight size={18} />
-                      </button>
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -212,6 +214,13 @@ const SuperAdminDashboard = () => {
                     const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
                     return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
                   })()}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-sm font-medium text-slate-400">Backup Storage</span>
+                <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">
+                  {stats?.server_health?.backup_storage_mb || 0} MB
                 </span>
               </div>
             </div>

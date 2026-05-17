@@ -370,19 +370,20 @@ const SuperAdminAnalytics = () => {
                                     }}
                                     itemStyle={{ fontSize: '12px', fontWeight: '900', color: '#10b981' }}
                                 />
-                                <Bar 
-                                    dataKey="count" 
-                                    fill="url(#barGradient)" 
-                                    radius={[10, 10, 0, 0]} 
-                                    name="Node Activation" 
-                                    animationDuration={2500}
-                                />
                                 <defs>
                                     <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="0%" stopColor="#10b981" stopOpacity={1}/>
                                         <stop offset="100%" stopColor="#059669" stopOpacity={0.2}/>
                                     </linearGradient>
                                 </defs>
+                                <Bar 
+                                    dataKey="count" 
+                                    fill="url(#barGradient)" 
+                                    radius={[10, 10, 0, 0]} 
+                                    name="Node Activation" 
+                                    animationDuration={2500}
+                                    maxBarSize={60}
+                                />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>

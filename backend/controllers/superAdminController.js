@@ -5,6 +5,7 @@ const { db } = require('../config/db');
 const { generateUuid } = require('../utils/identifier');
 const bcrypt = require('bcryptjs');
 const subscriptionService = require('../services/subscriptionService');
+const platformSettingsService = require('../services/platformSettingsService');
 
 // getSystemHealth and getHealth removed. Using systemHealthController instead.
 
@@ -15,7 +16,7 @@ exports.getStats = async (req, res) => {
         const [shopsCount] = await db.query('SELECT COUNT(*) as count FROM shops');
         const [usersCount] = await db.query('SELECT COUNT(*) as count FROM users');
         const [revenue] = await db.query('SELECT SUM(grand_total) as total FROM invoices WHERE payment_status != "cancelled"');
-        const [recentShops] = await db.query('SELECT name, identifier, subscription_status, created_at FROM shops ORDER BY created_at DESC LIMIT 5');
+        const [recentShops] = await db.query('SELECT id, name, identifier, status, subscription_status, created_at FROM shops ORDER BY created_at DESC LIMIT 5');
 
         // New shops trends
         const [[newShopsThisMonth]] = await db.query('SELECT COUNT(*) as count FROM shops WHERE created_at >= DATE_FORMAT(CURDATE(), "%Y-%m-01")');
@@ -53,13 +54,17 @@ exports.getStats = async (req, res) => {
         `);
 
         // Basic Server Health
+        const localBackupService = require('../services/localBackupService');
+        const backupStorageMb = await localBackupService.getTotalStorageUsed();
+        
         const memRaw = process.memoryUsage();
         const serverHealth = {
             status: 'online',
             uptime_seconds: Math.floor(process.uptime()),
             memory_used_mb: Math.round(memRaw.rss / 1024 / 1024),
             memory_total_mb: Math.round(os.totalmem() / 1024 / 1024),
-            db_status: 'connected'
+            db_status: 'connected',
+            backup_storage_mb: backupStorageMb
         };
 
         res.json({
@@ -260,7 +265,11 @@ exports.getShopById = async (req, res) => {
 };
 
 exports.createShop = async (req, res) => {
-    const { name, identifier, admin_name, admin_email, admin_password, menu_setup, source_shop_id } = req.body;
+    const { 
+        name, identifier, admin_name, admin_email, admin_password, 
+        menu_setup, source_shop_id, 
+        shop_email, shop_phone, shop_address 
+    } = req.body;
 
     if (!name || !identifier || !admin_name || !admin_email || !admin_password) {
         return res.status(400).json({ success: false, message: 'All fields are required.' });
@@ -283,11 +292,15 @@ exports.createShop = async (req, res) => {
         const shopUuid = generateUuid();
         const [shopResult] = await connection.query(
             `INSERT INTO shops
-             (uuid, name, identifier, slug, status, subscription_status, subscription_plan,
+             (uuid, name, identifier, slug, email, phone, address, status, subscription_status, subscription_plan,
               trial_ends_at)
-             VALUES (?, ?, ?, ?, 'active', 'trial', 'standard',
-              DATE_ADD(CURDATE(), INTERVAL 14 DAY))`,
-            [shopUuid, name, identifier, identifier]
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'trial', 'standard',
+              DATE_ADD(CURDATE(), INTERVAL ? DAY))`,
+            [
+                shopUuid, name, identifier, identifier, 
+                shop_email || null, shop_phone || null, shop_address || null,
+                platformSettingsService.getInt('trial_days', 14)
+            ]
         );
         const shopId = shopResult.insertId;
 
@@ -442,10 +455,52 @@ exports.createShopAdmin = async (req, res) => {
 };
 
 exports.updateShop = async (req, res) => {
-    const { name, status } = req.body;
+    const { name, status, email, phone, address } = req.body;
     try {
-        await db.query('UPDATE shops SET name = ?, status = ? WHERE id = ?', [name, status, req.params.id]);
+        await db.query(
+            'UPDATE shops SET name = ?, status = ?, email = ?, phone = ?, address = ? WHERE id = ?', 
+            [name, status, email, phone, address, req.params.id]
+        );
         res.json({ success: true, message: 'Shop updated' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+exports.updateDeliveryPermission = async (req, res) => {
+    const { enabled } = req.body;
+    try {
+        await db.query('UPDATE shops SET has_delivery_orders = ? WHERE id = ?', [enabled ? 1 : 0, req.params.id]);
+        res.json({ success: true, message: `Delivery permission ${enabled ? 'enabled' : 'disabled'}` });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+exports.updateFeaturePermission = async (req, res) => {
+    const { feature, enabled, isModule, isBatch, permissions } = req.body;
+    const allowedLegacy = ['has_delivery_orders', 'has_marketing_center', 'has_quick_retail'];
+    
+    try {
+        if (isBatch && permissions) {
+            await db.query('UPDATE shops SET module_permissions = ? WHERE id = ?', [JSON.stringify(permissions), req.params.id]);
+        } else if (isModule) {
+            const [[shop]] = await db.query('SELECT module_permissions FROM shops WHERE id = ?', [req.params.id]);
+            let perms = {};
+            if (shop.module_permissions) {
+                perms = typeof shop.module_permissions === 'string' ? JSON.parse(shop.module_permissions) : shop.module_permissions;
+            }
+            perms[feature] = enabled;
+            await db.query('UPDATE shops SET module_permissions = ? WHERE id = ?', [JSON.stringify(perms), req.params.id]);
+        } else {
+            if (!allowedLegacy.includes(feature)) {
+                return res.status(400).json({ success: false, message: 'Invalid legacy feature key' });
+            }
+            await db.query(`UPDATE shops SET ${feature} = ? WHERE id = ?`, [enabled ? 1 : 0, req.params.id]);
+        }
+        res.json({ success: true, message: `Permission updated successfully` });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -463,7 +518,9 @@ exports.getShops = async (req, res) => {
                 id, name, slug as identifier, status,
                 subscription_status, subscription_plan,
                 subscription_end_date, grace_until, trial_ends_at,
-                last_payment_date, last_payment_amount, next_billing_date
+                last_payment_date, last_payment_amount, next_billing_date,
+                has_delivery_orders, has_marketing_center, has_quick_retail,
+                module_permissions
             FROM shops 
             WHERE 1=1
         `;
@@ -884,9 +941,12 @@ exports.updatePlatformSettings = async (req, res) => {
             [req.user.id, 'platform_settings_updated', 'system', null, 'Updated platform settings', req.ip, req.headers['user-agent']]
         );
 
-        // Refresh security cache
+        // Refresh security cache & platform settings
         const securitySettingsService = require('../services/securitySettingsService');
+        const notificationService = require('../services/notificationService');
         await securitySettingsService.refresh();
+        await platformSettingsService.refresh();
+        await notificationService.refresh();
 
         res.json({ success: true, message: 'Settings updated successfully' });
     } catch (error) {

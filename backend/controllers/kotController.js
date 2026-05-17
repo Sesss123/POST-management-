@@ -1,6 +1,7 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
 const { buildIdOrUuidWhere, generateUuid } = require('../utils/identifier');
+const socketService = require('../services/socketService');
 
 // Helper to generate KOT number
 const generateKOTNo = () => {
@@ -43,7 +44,12 @@ exports.createKOT = async (req, res) => {
         );
 
         if (unsentItems.length === 0) {
-            throw new Error('No kitchen items to send');
+            await connection.commit();
+            return res.json({ 
+                success: true, 
+                message: 'All items are already sent or no kitchen items found',
+                data: { kot_id: null, printed: false }
+            });
         }
 
         // 2. Get table ID and session details
@@ -113,6 +119,9 @@ exports.createKOT = async (req, res) => {
         await logAction(req.user.id, 'kot_created', 'kot_order', kotId, null, { kot_no, sessionId, items_count: unsentItems.length });
 
         await connection.commit();
+        
+        socketService.emitToShop(req.shopId, 'new_kot', { kot_id: kotId, kot_no });
+
         res.status(201).json({ 
             success: true, 
             message: 'KOT sent to kitchen', 
@@ -192,6 +201,9 @@ exports.createKOTFromInvoice = async (req, res) => {
         await logAction(req.user.id, 'kot_created_from_invoice', 'kot_order', kotId, null, { kot_no, invoice_id: invoice.id });
 
         await connection.commit();
+
+        socketService.emitToShop(req.shopId, 'new_kot', { kot_id: kotId, kot_no, invoice_id: invoice.id });
+
         res.status(201).json({ 
             success: true, 
             message: 'KOT sent to kitchen', 
@@ -212,15 +224,21 @@ exports.createKOTFromInvoice = async (req, res) => {
 // @access  Private
 exports.getKOTs = async (req, res) => {
     try {
-        const query = `
+        const { date } = req.query;
+        let query = `
             SELECT k.*, t.table_no, u.name as created_by_name
             FROM kot_orders k
             LEFT JOIN restaurant_tables t ON k.table_id = t.id
             LEFT JOIN users u ON k.created_by = u.id
             WHERE k.shop_id = ?
-            ORDER BY k.created_at DESC
         `;
-        const [kots] = await db.query(query, [req.shopId]);
+        const params = [req.shopId];
+        if (date) {
+            query += " AND DATE(k.created_at) = ?";
+            params.push(date);
+        }
+        query += " ORDER BY k.created_at DESC";
+        const [kots] = await db.query(query, params);
         res.json({ success: true, data: kots });
     } catch (error) {
         console.error(error);

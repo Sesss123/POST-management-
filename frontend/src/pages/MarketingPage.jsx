@@ -129,8 +129,7 @@ const MarketingPage = () => {
                   label="Target Audience" 
                   options={[
                     { value: 'all', label: 'All Customers' },
-                    { value: 'debtors', label: 'Outstanding Debtors' },
-                    { value: 'loyalty_members', label: 'Loyalty Members Only' }
+                    { value: 'debtors', label: 'Outstanding Debtors' }
                   ]}
                   value={newCampaign.targetGroup}
                   onChange={(e) => setNewCampaign({...newCampaign, targetGroup: e.target.value})}
@@ -235,19 +234,6 @@ const MarketingPage = () => {
               </div>
           </div>
 
-          <div className="bg-emerald-900 rounded-[40px] p-8 text-white relative overflow-hidden group shadow-2xl shadow-emerald-200">
-              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-125 transition-transform duration-500">
-                  <Star size={160} />
-              </div>
-              <div className="relative z-10 space-y-4">
-                  <Badge className="bg-white/10 text-white border-white/20">Loyalty Perk</Badge>
-                  <h3 className="text-3xl font-black tracking-tighter">Engage Loyal Fans</h3>
-                  <p className="text-emerald-100 font-medium text-sm leading-relaxed max-w-md">
-                      Send exclusive promotional offers to your loyalty members. High-conversion marketing made simple.
-                  </p>
-                  <AppButton variant="secondary" className="bg-white text-emerald-900 border-none px-8">View Loyalty Members</AppButton>
-              </div>
-          </div>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { kitchenApi } from '../api/api';
+import { getSocket } from '../api/socket';
 import { 
   ChefHat, 
   Clock, 
@@ -82,8 +83,16 @@ const KitchenDisplay = () => {
   useEffect(() => {
     if (activeTab === 'active') {
       fetchKots();
-      const interval = setInterval(fetchKots, refreshInterval);
-      return () => clearInterval(interval);
+      
+      const socket = getSocket();
+      if (socket) {
+        socket.on('new_kot', fetchKots);
+        socket.on('kot_status_updated', fetchKots);
+        return () => {
+          socket.off('new_kot', fetchKots);
+          socket.off('kot_status_updated', fetchKots);
+        };
+      }
     } else {
       fetchHistory();
     }

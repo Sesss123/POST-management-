@@ -11,7 +11,8 @@ const {
     getSupplierSummary, 
     getAnalytics, 
     getAlerts, 
-    getBusinessIntelligence 
+    getBusinessIntelligence,
+    getCashCollectionReport
 } = require('../controllers/reportController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -33,5 +34,6 @@ router.get('/supplier-summary', getSupplierSummary);
 router.get('/analytics', getAnalytics);
 router.get('/alerts', getAlerts);
 router.get('/business-intelligence', getBusinessIntelligence);
+router.get('/cash-collection', getCashCollectionReport);
 
 module.exports = router;

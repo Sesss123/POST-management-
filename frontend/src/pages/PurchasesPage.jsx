@@ -17,7 +17,11 @@ import {
   AlertCircle,
   X,
   User,
-  History
+  History,
+  Sparkles,
+  RefreshCw,
+  Activity,
+  ArrowRight
 } from 'lucide-react';
 import { 
   AppButton, 
@@ -29,6 +33,43 @@ import {
   Badge
 } from '../components/ui';
 import { cn } from '../utils/cn';
+
+const GlassCard = ({ title, value, icon: Icon, variant = 'primary', className }) => {
+    const variants = {
+        primary: "bg-indigo-50 border-indigo-100",
+        success: "bg-emerald-50 border-emerald-100",
+        danger: "bg-rose-50 border-rose-100",
+        warning: "bg-amber-50 border-amber-100",
+    };
+
+    const iconBg = {
+        primary: "bg-white text-indigo-600",
+        success: "bg-white text-emerald-600",
+        danger: "bg-white text-rose-600",
+        warning: "bg-white text-amber-600",
+    };
+
+    return (
+        <div className={cn(
+            "relative group overflow-hidden bg-white border rounded-[40px] p-8 shadow-xl shadow-slate-200/40 transition-all duration-500 hover:scale-[1.02]",
+            variants[variant],
+            className
+        )}>
+            <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/50 rounded-full blur-3xl group-hover:bg-white/80 transition-colors"></div>
+            <div className="relative z-10">
+                <div className="flex items-center justify-between mb-6">
+                    <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm", iconBg[variant])}>
+                        <Icon size={28} />
+                    </div>
+                </div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">{title}</p>
+                <h4 className="text-3xl font-black text-slate-900 tabular-nums tracking-tighter">
+                    {value}
+                </h4>
+            </div>
+        </div>
+    );
+};
 
 const PurchasesPage = () => {
   const toast = useToast();
@@ -175,185 +216,283 @@ const PurchasesPage = () => {
 
   const getStatusBadge = (status) => {
     switch(status) {
-      case 'paid': return <Badge variant="success">Paid</Badge>;
-      case 'partial': return <Badge variant="warning">Partial</Badge>;
-      case 'unpaid': return <Badge variant="danger">Unpaid</Badge>;
-      default: return <Badge>{status}</Badge>;
+      case 'paid': return <Badge variant="success" className="rounded-xl px-4 py-1 font-black text-[9px]">PAID</Badge>;
+      case 'partial': return <Badge variant="warning" className="rounded-xl px-4 py-1 font-black text-[9px]">PARTIAL</Badge>;
+      case 'unpaid': return <Badge variant="danger" className="rounded-xl px-4 py-1 font-black text-[9px]">UNPAID</Badge>;
+      default: return <Badge className="rounded-xl px-4 py-1 font-black text-[9px]">{status.toUpperCase()}</Badge>;
     }
   };
 
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-12">
-      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Stock Purchases</h2>
-          <p className="text-slate-400 text-sm font-medium">Record and track inventory stock entries</p>
+  if (loading && purchases.length === 0) return (
+    <div className="h-full flex items-center justify-center p-20 bg-slate-50/50">
+        <div className="relative">
+            <div className="w-16 h-16 border-4 border-indigo-200 rounded-full animate-spin"></div>
+            <div className="absolute top-0 left-0 w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
         </div>
-        <AppButton icon={Plus} onClick={() => setShowAddModal(true)}>Add New Purchase</AppButton>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-130px)] space-y-4 animate-in fade-in duration-700 p-1 selection:bg-indigo-500/30 overflow-hidden bg-slate-50/50">
+      {/* Premium Neural Header - White Theme */}
+      <header className="relative group shrink-0">
+        <div className="absolute -inset-1 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-500 rounded-[32px] blur opacity-10 group-hover:opacity-20 transition duration-1000"></div>
+        <div className="relative flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 bg-white p-6 rounded-[32px] border border-slate-100 shadow-2xl shadow-slate-200/50 overflow-hidden">
+            <div className="flex items-center gap-6 relative z-10">
+                <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-700 rounded-3xl flex items-center justify-center text-white shadow-2xl shadow-indigo-500/40 group-hover:scale-110 transition-transform duration-500">
+                    <ShoppingCart size={32} />
+                </div>
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Sparkles size={14} className="text-indigo-600" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-600">Inventory Operations</span>
+                    </div>
+                    <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-1 uppercase">Stock Acquisitions</h2>
+                    <p className="text-sm font-medium text-slate-400">Record and monitor vendor inventory entries and liability</p>
+                </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto relative z-10">
+                <AppButton 
+                    variant="primary" 
+                    icon={Plus} 
+                    size="lg" 
+                    className="w-full sm:w-auto rounded-[24px] px-10 py-6 bg-indigo-600 hover:bg-indigo-500 shadow-2xl shadow-indigo-500/20 font-black uppercase tracking-widest text-xs border-none" 
+                    onClick={() => setShowAddModal(true)}
+                >
+                    Record Acquisition
+                </AppButton>
+                <AppButton 
+                    variant="secondary" 
+                    icon={RefreshCw} 
+                    size="lg" 
+                    className="rounded-[24px] bg-white border-slate-100 text-slate-400 hover:text-indigo-600 shadow-sm" 
+                    onClick={fetchData} 
+                />
+            </div>
+        </div>
       </header>
 
-      {/* Filters */}
-      <AppCard className="p-2">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-2">
-          <FormSelect 
-            placeholder="Filter by Supplier"
-            value={filters.supplier_id}
-            onChange={(e) => setFilters({...filters, supplier_id: e.target.value})}
-            options={[
-              { value: '', label: 'All Suppliers' },
-              ...suppliers.map(s => ({ value: s.id, label: s.name }))
-            ]}
-          />
-          <FormSelect 
-            placeholder="Payment Status"
-            value={filters.payment_status}
-            onChange={(e) => setFilters({...filters, payment_status: e.target.value})}
-            options={[
-              { value: '', label: 'All Statuses' },
-              { value: 'paid', label: 'Paid' },
-              { value: 'partial', label: 'Partial' },
-              { value: 'unpaid', label: 'Unpaid' }
-            ]}
-          />
-          <div className="flex gap-2 col-span-1 md:col-span-2">
-             <FormInput 
-               type="date" 
-               value={filters.date_from} 
-               onChange={(e) => setFilters({...filters, date_from: e.target.value})} 
-             />
-             <FormInput 
-               type="date" 
-               value={filters.date_to} 
-               onChange={(e) => setFilters({...filters, date_to: e.target.value})} 
-             />
-             <AppButton variant="secondary" icon={X} onClick={() => setFilters({ supplier_id: '', payment_status: '', date_from: '', date_to: '' })} />
+      {/* Light Filters Bar */}
+      <section className="bg-white p-6 rounded-[36px] border border-slate-100 shadow-2xl shadow-slate-200/20 shrink-0">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="relative group">
+                  <User className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <select 
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-14 pr-6 text-slate-900 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                      value={filters.supplier_id}
+                      onChange={(e) => setFilters({...filters, supplier_id: e.target.value})}
+                  >
+                      <option value="">All Vendors</option>
+                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+              </div>
+              <div className="relative group">
+                  <Activity className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <select 
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-14 pr-6 text-slate-900 font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                      value={filters.payment_status}
+                      onChange={(e) => setFilters({...filters, payment_status: e.target.value})}
+                  >
+                      <option value="">All Statuses</option>
+                      <option value="paid">Paid Protocols</option>
+                      <option value="partial">Partial Settlements</option>
+                      <option value="unpaid">Pending Liabilities</option>
+                  </select>
+              </div>
+              <div className="md:col-span-2 flex gap-4">
+                  <div className="relative flex-1 group">
+                      <Calendar className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                          type="date" 
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-14 pr-6 text-slate-900 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                          value={filters.date_from}
+                          onChange={(e) => setFilters({...filters, date_from: e.target.value})}
+                      />
+                  </div>
+                  <div className="relative flex-1 group">
+                      <Calendar className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                          type="date" 
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-14 pr-6 text-slate-900 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                          value={filters.date_to}
+                          onChange={(e) => setFilters({...filters, date_to: e.target.value})}
+                      />
+                  </div>
+                  <AppButton 
+                    variant="secondary" 
+                    icon={X} 
+                    className="rounded-2xl bg-white border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600 shadow-sm" 
+                    onClick={() => setFilters({ supplier_id: '', payment_status: '', date_from: '', date_to: '' })} 
+                  />
+              </div>
           </div>
-        </div>
-      </AppCard>
+      </section>
 
-      {/* Purchases List */}
-      <AppCard title="Purchase History" icon={History}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
-            <thead>
-              <tr className="bg-slate-50 text-slate-400 border-b border-slate-100">
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px]">Date</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px]">Purchase No</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px]">Supplier</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px]">Total Amount</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px]">Paid</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px]">Status</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px] text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {loading ? (
-                <tr><td colSpan="7" className="p-12 text-center text-slate-400">Loading purchases...</td></tr>
-              ) : purchases.length === 0 ? (
-                <tr><td colSpan="7" className="p-12 text-center text-slate-400">No purchases found.</td></tr>
-              ) : purchases.map((p) => (
-                <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="px-6 py-4 font-bold text-slate-600 whitespace-nowrap">
-                    {new Date(p.purchase_date).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 font-black text-indigo-600">{p.purchase_no}</td>
-                  <td className="px-6 py-4 font-medium text-slate-900">{p.supplier_name}</td>
-                  <td className="px-6 py-4 font-black text-slate-900">{formatCurrency(p.grand_total)}</td>
-                  <td className="px-6 py-4 font-bold text-slate-600">{formatCurrency(p.paid_amount)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(p.payment_status)}</td>
-                  <td className="px-6 py-4 text-right">
-                    <AppButton size="sm" variant="secondary" icon={ChevronRight} onClick={() => fetchPurchaseDetails(p.id)}>View</AppButton>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </AppCard>
+      {/* Acquisitions Ledger - White Theme */}
+      <div className="flex-1 overflow-hidden bg-white rounded-[44px] border border-slate-100 shadow-2xl shadow-slate-200/50 flex flex-col">
+          <div className="p-10 border-b border-slate-50 flex items-center justify-between shrink-0 bg-slate-50/30">
+              <div className="flex items-center gap-6">
+                  <div className="w-14 h-14 bg-white text-indigo-600 rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm">
+                      <History size={28} />
+                  </div>
+                  <div>
+                      <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Transmission Ledger</h3>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Audited Stock acquisition telemetry</p>
+                  </div>
+              </div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto custom-scrollbar">
+              <table className="w-full text-left">
+                  <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-20 border-b border-slate-50">
+                      <tr>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Timestamp</th>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Identification</th>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Vendor</th>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Magnitude</th>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Settled</th>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Protocol</th>
+                          <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                      {purchases.length === 0 ? (
+                          <tr>
+                              <td colSpan="7" className="py-40 text-center opacity-20">
+                                  <ShoppingCart size={64} className="mx-auto mb-6 text-slate-300" />
+                                  <p className="text-2xl font-black uppercase tracking-widest text-slate-400">No acquisition records</p>
+                              </td>
+                          </tr>
+                      ) : purchases.map((p) => (
+                          <tr key={p.id} className="group hover:bg-slate-50/50 transition-all">
+                              <td className="px-10 py-8">
+                                  <p className="text-sm font-black text-slate-900 tabular-nums tracking-tight mb-1">
+                                      {new Date(p.purchase_date).toLocaleDateString()}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Verified Log</p>
+                              </td>
+                              <td className="px-10 py-8">
+                                  <span className="text-sm font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100 shadow-sm">
+                                      {p.purchase_no}
+                                  </span>
+                              </td>
+                              <td className="px-10 py-8">
+                                  <p className="text-sm font-black text-slate-900 uppercase tracking-tight">{p.supplier_name}</p>
+                              </td>
+                              <td className="px-10 py-8 font-black text-slate-900 tabular-nums tracking-tighter text-lg">
+                                  {formatCurrency(p.grand_total)}
+                              </td>
+                              <td className="px-10 py-8 font-bold text-slate-400 tabular-nums">
+                                  {formatCurrency(p.paid_amount)}
+                              </td>
+                              <td className="px-10 py-8">
+                                  {getStatusBadge(p.payment_status)}
+                              </td>
+                              <td className="px-10 py-8 text-right">
+                                  <button 
+                                      onClick={() => fetchPurchaseDetails(p.id)}
+                                      className="w-12 h-12 bg-slate-50 text-slate-400 hover:bg-indigo-600 hover:text-white rounded-2xl transition-all flex items-center justify-center border border-slate-100 group-hover:scale-105 shadow-sm active:scale-95"
+                                  >
+                                      <ChevronRight size={20} />
+                                  </button>
+                              </td>
+                          </tr>
+                      ))}
+                  </tbody>
+              </table>
+          </div>
+      </div>
 
-      {/* Add Purchase Modal */}
+      {/* Add Purchase Modal - Updated accents */}
       <AppModal 
         isOpen={showAddModal} 
         onClose={() => setShowAddModal(false)} 
-        title="Record New Purchase" 
-        icon={ShoppingCart}
+        title="Initialize Acquisition Protocol" 
+        description="Establishing inventory entry into system core"
         size="lg"
       >
-        <form onSubmit={handleSubmitPurchase} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form onSubmit={handleSubmitPurchase} className="space-y-8 py-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
              <FormSelect 
-                label="Select Supplier"
+                label="Authorized Vendor"
                 required
                 value={newPurchase.supplier_id}
                 onChange={(e) => setNewPurchase({...newPurchase, supplier_id: e.target.value})}
                 options={[
-                  { value: '', label: 'Choose a supplier...' },
-                  ...suppliers.map(s => ({ value: s.id, label: s.name }))
+                  { value: '', label: 'IDENTIFY VENDOR...' },
+                  ...suppliers.map(s => ({ value: s.id, label: s.name.toUpperCase() }))
                 ]}
+                className="rounded-[28px] h-20 px-8 bg-slate-50 border-2 border-slate-100 focus:border-indigo-600"
              />
              <FormInput 
-                label="Purchase Date"
+                label="Acquisition Timestamp"
                 type="date"
                 required
                 value={newPurchase.purchase_date}
                 onChange={(e) => setNewPurchase({...newPurchase, purchase_date: e.target.value})}
+                className="rounded-[28px] h-20 px-8 bg-slate-50 border-2 border-slate-100 focus:border-indigo-600"
              />
           </div>
 
-          <div className="space-y-3">
-             <div className="flex items-center justify-between">
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Items List</h4>
-                <AppButton type="button" size="xs" variant="secondary" icon={Plus} onClick={handleAddItemRow}>Add Item</AppButton>
+          <div className="space-y-6">
+             <div className="flex items-center justify-between px-2">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Inventory Payload</h4>
+                <button type="button" onClick={handleAddItemRow} className="flex items-center gap-2 px-6 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-100 transition-colors shadow-sm">
+                    <Plus size={14} /> Add Protocol
+                </button>
              </div>
              
-             <div className="space-y-3">
+             <div className="space-y-4">
                 {newPurchase.items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 relative group">
-                     <div className="col-span-12 md:col-span-5">
+                  <div key={index} className="grid grid-cols-12 gap-6 p-8 bg-slate-50 rounded-[40px] border border-slate-100 relative group transition-all hover:bg-white hover:shadow-xl shadow-inner">
+                     <div className="col-span-12 md:col-span-6 space-y-4">
                         <FormSelect 
                            value={item.item_id}
                            onChange={(e) => handleItemChange(index, 'item_id', e.target.value)}
                            options={[
-                             { value: '', label: 'Select inventory item (Optional)' },
-                             ...inventoryItems.map(i => ({ value: i.id, label: i.name }))
+                             { value: '', label: 'IDENTIFY INVENTORY ITEM...' },
+                             ...inventoryItems.map(i => ({ value: i.id, label: i.name.toUpperCase() }))
                            ]}
+                           className="rounded-2xl h-14 bg-white border-2 border-slate-100 focus:border-indigo-600"
                         />
-                        <div className="mt-2">
-                           <FormInput 
-                              placeholder="Item name (Manual entry)"
-                              value={item.item_name}
-                              onChange={(e) => handleItemChange(index, 'item_name', e.target.value)}
-                           />
-                        </div>
+                        <FormInput 
+                            placeholder="Manual Identification Label"
+                            value={item.item_name}
+                            onChange={(e) => handleItemChange(index, 'item_name', e.target.value)}
+                            className="rounded-2xl h-14 bg-white border-2 border-slate-100 focus:border-indigo-600"
+                        />
                      </div>
                      <div className="col-span-4 md:col-span-2">
                         <FormInput 
                            type="number"
-                           label="Qty"
+                           label="Magnitude"
                            value={item.qty}
                            onChange={(e) => handleItemChange(index, 'qty', e.target.value)}
+                           className="rounded-2xl h-14 bg-white border-2 border-slate-100 focus:border-indigo-600"
                         />
                      </div>
-                     <div className="col-span-4 md:col-span-3">
+                     <div className="col-span-4 md:col-span-2">
                         <FormInput 
                            type="number"
                            label="Unit Cost"
                            value={item.unit_cost}
                            onChange={(e) => handleItemChange(index, 'unit_cost', e.target.value)}
+                           className="rounded-2xl h-14 bg-white border-2 border-slate-100 focus:border-indigo-600"
                         />
                      </div>
-                     <div className="col-span-4 md:col-span-2 text-right flex flex-col justify-end">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
-                        <p className="text-sm font-black text-slate-900">{formatCurrency(item.total)}</p>
+                     <div className="col-span-4 md:col-span-2 text-right flex flex-col justify-end pb-4">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Magnitude Total</p>
+                        <p className="text-lg font-black text-slate-900 tabular-nums tracking-tighter">{formatCurrency(item.total)}</p>
                      </div>
                      
                      {newPurchase.items.length > 1 && (
                         <button 
                           type="button"
                           onClick={() => handleRemoveItemRow(index)}
-                          className="absolute -right-2 -top-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                          className="absolute -right-3 -top-3 w-10 h-10 bg-rose-600 text-white rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-xl hover:scale-110 active:scale-90"
                         >
-                          <X size={14} />
+                          <X size={18} />
                         </button>
                      )}
                   </div>
@@ -361,145 +500,167 @@ const PurchasesPage = () => {
              </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-slate-100">
-             <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-10 border-t border-slate-100">
+             <div className="grid grid-cols-1 gap-6">
                 <FormInput 
-                  label="Discount"
+                  label="Protocol Discount"
                   type="number"
                   value={newPurchase.discount}
                   onChange={(e) => setNewPurchase({...newPurchase, discount: e.target.value})}
+                  className="rounded-[24px] h-16 bg-slate-50 border-2 border-slate-100 focus:border-indigo-600"
                 />
                 <FormInput 
-                  label="Paid Amount"
+                  label="Immediate Settlement (Paid)"
                   type="number"
                   value={newPurchase.paid_amount}
                   onChange={(e) => setNewPurchase({...newPurchase, paid_amount: e.target.value})}
+                  className="rounded-[24px] h-16 bg-slate-50 border-2 border-slate-100 focus:border-indigo-600"
                 />
                 <FormSelect 
-                   label="Payment Method"
+                   label="Settlement Channel"
                    value={newPurchase.payment_method}
                    onChange={(e) => setNewPurchase({...newPurchase, payment_method: e.target.value})}
                    options={[
-                     { value: 'cash', label: 'Cash' },
-                     { value: 'bank_transfer', label: 'Bank Transfer' },
-                     { value: 'card', label: 'Card' }
+                     { value: 'cash', label: 'CASH LIQUIDITY' },
+                     { value: 'bank_transfer', label: 'WIRE TRANSFER' },
+                     { value: 'card', label: 'CREDIT PROTOCOL' }
                    ]}
+                   className="rounded-[24px] h-16 bg-slate-50 border-2 border-slate-100 focus:border-indigo-600"
                 />
                 <FormInput 
-                  label="Note"
+                  label="Transmission Metadata"
                   value={newPurchase.note}
                   onChange={(e) => setNewPurchase({...newPurchase, note: e.target.value})}
-                  placeholder="Reference, invoice no, etc."
+                  placeholder="Reference IDs / Logistics notes"
+                  className="rounded-[24px] h-16 bg-slate-50 border-2 border-slate-100 focus:border-indigo-600"
                 />
              </div>
 
-             <div className="bg-slate-900 text-white p-6 rounded-3xl space-y-4 shadow-xl">
-                <div className="flex justify-between items-center opacity-60">
-                   <span className="text-xs font-black uppercase tracking-widest">Subtotal</span>
-                   <span className="font-bold">{formatCurrency(calculateSubtotal())}</span>
+             <div className="bg-slate-900 rounded-[44px] p-10 flex flex-col justify-between shadow-2xl relative overflow-hidden group">
+                <div className="space-y-6 relative z-10">
+                    <div className="flex justify-between items-center opacity-40">
+                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Sub-magnitude</span>
+                       <span className="font-black text-white tabular-nums tracking-tighter">{formatCurrency(calculateSubtotal())}</span>
+                    </div>
+                    <div className="flex justify-between items-center opacity-40">
+                       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Magnitude Reduction</span>
+                       <span className="font-black text-rose-400 tabular-nums tracking-tighter">-{formatCurrency(newPurchase.discount)}</span>
+                    </div>
+                    <div className="pt-6 border-t border-white/10">
+                       <div className="flex justify-between items-center mb-1">
+                          <span className="text-sm font-black uppercase tracking-[0.3em] text-indigo-400">Grand Magnitude</span>
+                          <span className="text-4xl font-black text-white tracking-tighter tabular-nums">{formatCurrency(calculateGrandTotal())}</span>
+                       </div>
+                       <div className="flex justify-between items-center pt-4">
+                          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-rose-500">Remaining Liability</span>
+                          <span className="text-xl font-black text-rose-500 tabular-nums tracking-tighter">{formatCurrency(calculateBalance())}</span>
+                       </div>
+                    </div>
                 </div>
-                <div className="flex justify-between items-center opacity-60">
-                   <span className="text-xs font-black uppercase tracking-widest">Discount</span>
-                   <span className="font-bold">-{formatCurrency(newPurchase.discount)}</span>
+                
+                <div className="pt-10 relative z-10">
+                    {calculateBalance() === 0 ? (
+                       <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 flex items-center gap-3">
+                           <CheckCircle2 className="text-emerald-500" size={20} />
+                           <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Protocol Fully Settled</span>
+                       </div>
+                    ) : (
+                       <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex items-center gap-3">
+                           <AlertCircle className="text-rose-500" size={20} />
+                           <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Liability Authorized for Ledger</span>
+                       </div>
+                    )}
                 </div>
-                <div className="flex justify-between items-center pt-4 border-t border-white/10">
-                   <span className="text-sm font-black uppercase tracking-widest text-indigo-400">Grand Total</span>
-                   <span className="text-2xl font-black">{formatCurrency(calculateGrandTotal())}</span>
-                </div>
-                <div className="flex justify-between items-center pt-2 text-rose-400">
-                   <span className="text-[10px] font-black uppercase tracking-widest">Balance Payable</span>
-                   <span className="text-lg font-black">{formatCurrency(calculateBalance())}</span>
-                </div>
-                <div className="pt-4 flex items-center gap-2">
-                   {calculateBalance() === 0 ? (
-                      <Badge variant="success" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">PAID FULL</Badge>
-                   ) : parseFloat(newPurchase.paid_amount) > 0 ? (
-                      <Badge variant="warning" className="bg-amber-500/20 text-amber-400 border-amber-500/30">PARTIAL PAYMENT</Badge>
-                   ) : (
-                      <Badge variant="danger" className="bg-rose-500/20 text-rose-400 border-rose-500/30">UNPAID / CREDIT</Badge>
-                   )}
-                   <span className="text-[9px] font-bold text-white/40 italic">Balance will be added to supplier account</span>
-                </div>
+                
+                <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-indigo-600/10 rounded-full blur-[100px]" />
              </div>
           </div>
 
-          <AppButton type="submit" loading={submitting} block size="lg" className="rounded-2xl h-14">Record Stock Purchase</AppButton>
+          <div className="flex gap-6 pt-6">
+            <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-6 bg-slate-100 text-slate-500 rounded-[28px] font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all active:scale-95">Abort</button>
+            <AppButton type="submit" loading={submitting} className="flex-[2] py-6 rounded-[28px] font-black uppercase text-xs tracking-widest shadow-2xl shadow-indigo-600/20 bg-indigo-600 hover:bg-indigo-500 border-none active:scale-95">Authorize Acquisition</AppButton>
+          </div>
         </form>
       </AppModal>
 
-      {/* Details Modal */}
+      {/* Details Modal - Updated accents */}
       <AppModal 
         isOpen={showDetailsModal} 
         onClose={() => setShowDetailsModal(false)} 
-        title={`Purchase Details: ${selectedPurchase?.purchase_no}`} 
-        icon={Info}
+        title={`Acquisition Report: ${selectedPurchase?.purchase_no}`} 
+        description="Detailed telemetry for inventory entry"
         size="lg"
       >
         {selectedPurchase && (
-           <div className="space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-2xl">
+           <div className="space-y-10 py-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 p-8 bg-slate-50 rounded-[40px] border border-slate-100 shadow-inner">
                  <div>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Supplier</p>
-                    <p className="font-bold text-slate-900">{selectedPurchase.supplier_name}</p>
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Vendor Identity</p>
+                    <p className="font-black text-slate-900 text-lg tracking-tight leading-none uppercase">{selectedPurchase.supplier_name}</p>
                  </div>
                  <div>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Date</p>
-                    <p className="font-bold text-slate-900">{new Date(selectedPurchase.purchase_date).toLocaleDateString()}</p>
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Transmission Date</p>
+                    <p className="font-black text-slate-900 text-lg tracking-tight leading-none">{new Date(selectedPurchase.purchase_date).toLocaleDateString()}</p>
                  </div>
                  <div>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Status</p>
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Settlement Status</p>
                     {getStatusBadge(selectedPurchase.payment_status)}
                  </div>
                  <div>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Created By</p>
-                    <p className="font-bold text-slate-900">{selectedPurchase.created_by_name}</p>
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Authorized By</p>
+                    <p className="font-black text-indigo-600 text-lg tracking-tight leading-none uppercase">{selectedPurchase.created_by_name}</p>
                  </div>
               </div>
 
-              <div className="border border-slate-100 rounded-3xl overflow-hidden">
-                 <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50">
+              <div className="bg-white rounded-[40px] border border-slate-100 overflow-hidden shadow-2xl shadow-slate-200/40">
+                 <table className="w-full text-left">
+                    <thead className="bg-slate-50 border-b border-slate-100">
                        <tr className="text-slate-400 font-black uppercase tracking-widest text-[9px]">
-                          <th className="px-4 py-3">Item Name</th>
-                          <th className="px-4 py-3">Qty</th>
-                          <th className="px-4 py-3">Unit Cost</th>
-                          <th className="px-4 py-3 text-right">Total</th>
+                          <th className="px-8 py-4">Inventory Item</th>
+                          <th className="px-8 py-4">Magnitude</th>
+                          <th className="px-8 py-4">Unit Magnitude</th>
+                          <th className="px-8 py-4 text-right">Magnitude Total</th>
                        </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                        {selectedPurchase.items.map((item, idx) => (
-                          <tr key={idx}>
-                             <td className="px-4 py-3 font-bold text-slate-700">{item.item_name}</td>
-                             <td className="px-4 py-3 font-medium text-slate-500">{item.qty}</td>
-                             <td className="px-4 py-3 font-medium text-slate-500">{formatCurrency(item.unit_cost)}</td>
-                             <td className="px-4 py-3 font-black text-slate-900 text-right">{formatCurrency(item.total)}</td>
+                          <tr key={idx} className="hover:bg-slate-50/50 transition-all">
+                             <td className="px-8 py-6 font-black text-slate-900 uppercase tracking-tight leading-none">{item.item_name}</td>
+                             <td className="px-8 py-6 font-bold text-slate-500 tabular-nums">{item.qty}</td>
+                             <td className="px-8 py-6 font-bold text-slate-500 tabular-nums">{formatCurrency(item.unit_cost)}</td>
+                             <td className="px-8 py-6 font-black text-slate-900 text-right tabular-nums tracking-tighter text-lg">{formatCurrency(item.total)}</td>
                           </tr>
                        ))}
                     </tbody>
                  </table>
               </div>
 
-              <div className="flex flex-col items-end gap-2 text-sm pr-4">
-                 <div className="flex justify-between w-64 opacity-60">
-                    <span className="font-bold uppercase tracking-widest text-[10px]">Subtotal</span>
-                    <span className="font-bold">{formatCurrency(selectedPurchase.subtotal)}</span>
+              <div className="flex flex-col items-end gap-4 pr-10">
+                 <div className="flex justify-between w-80 opacity-40">
+                    <span className="font-black uppercase tracking-[0.2em] text-[10px] text-slate-900">Net Payload</span>
+                    <span className="font-black tabular-nums text-slate-900">{formatCurrency(selectedPurchase.subtotal)}</span>
                  </div>
-                 <div className="flex justify-between w-64 opacity-60">
-                    <span className="font-bold uppercase tracking-widest text-[10px]">Discount</span>
-                    <span className="font-bold">-{formatCurrency(selectedPurchase.discount)}</span>
+                 <div className="flex justify-between w-80 opacity-40">
+                    <span className="font-black uppercase tracking-[0.2em] text-[10px] text-slate-900">Protocol Reduction</span>
+                    <span className="font-black tabular-nums text-slate-900">-{formatCurrency(selectedPurchase.discount)}</span>
                  </div>
-                 <div className="flex justify-between w-64 pt-2 border-t border-slate-100">
-                    <span className="font-black uppercase tracking-widest text-xs">Grand Total</span>
-                    <span className="font-black text-lg">{formatCurrency(selectedPurchase.grand_total)}</span>
+                 <div className="flex justify-between w-80 pt-6 border-t border-slate-100">
+                    <span className="font-black uppercase tracking-[0.2em] text-xs text-indigo-600">Total Magnitude</span>
+                    <span className="font-black text-3xl tabular-nums tracking-tighter text-slate-900">{formatCurrency(selectedPurchase.grand_total)}</span>
                  </div>
-                 <div className="flex justify-between w-64 text-indigo-600">
-                    <span className="font-black uppercase tracking-widest text-[10px]">Paid Amount</span>
-                    <span className="font-black">{formatCurrency(selectedPurchase.paid_amount)}</span>
+                 <div className="flex justify-between w-80 text-emerald-600 bg-emerald-50 p-6 rounded-[24px] border border-emerald-100 shadow-sm">
+                    <span className="font-black uppercase tracking-[0.2em] text-[10px]">Authorized Payout</span>
+                    <span className="font-black text-xl tabular-nums tracking-tighter">{formatCurrency(selectedPurchase.paid_amount)}</span>
                  </div>
-                 <div className="flex justify-between w-64 text-rose-500 bg-rose-50 p-2 rounded-xl mt-2">
-                    <span className="font-black uppercase tracking-widest text-[10px]">Balance Payable</span>
-                    <span className="font-black">{formatCurrency(selectedPurchase.balance_amount)}</span>
+                 <div className="flex justify-between w-80 text-rose-500 bg-rose-50 p-6 rounded-[24px] border border-rose-100 shadow-sm">
+                    <span className="font-black uppercase tracking-[0.2em] text-[10px]">Outstanding Liability</span>
+                    <span className="font-black text-xl tabular-nums tracking-tighter">{formatCurrency(selectedPurchase.balance_amount)}</span>
                  </div>
+              </div>
+              
+              <div className="pt-10 flex gap-4">
+                  <AppButton variant="secondary" className="flex-1 py-6 rounded-[28px] font-black uppercase text-xs tracking-widest bg-white border-slate-100 text-slate-400 hover:bg-slate-50 shadow-sm" onClick={() => setShowDetailsModal(false)}>Close Report</AppButton>
+                  <AppButton variant="primary" className="flex-1 py-6 rounded-[28px] font-black uppercase text-xs tracking-widest bg-indigo-600 hover:bg-indigo-500 shadow-2xl shadow-indigo-600/20 border-none active:scale-95">Export Metadata</AppButton>
               </div>
            </div>
         )}

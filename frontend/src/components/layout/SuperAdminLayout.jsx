@@ -35,6 +35,7 @@ const SuperAdminLayout = () => {
     { label: 'Broadcasts', path: '/super-admin/announcements', icon: Megaphone },
     { label: 'Support Tickets', path: '/super-admin/tickets', icon: MessageSquare },
     { label: 'Platform Users', path: '/super-admin/users', icon: Users },
+    { label: 'Feature Access', path: '/super-admin/permissions', icon: Layers },
     { label: 'System Health', path: '/super-admin/system-health', icon: HeartPulse },
     { label: 'Security Center', path: '/super-admin/security', icon: ShieldCheck },
     { label: 'Audit Logs', path: '/super-admin/audit-logs', icon: Database },

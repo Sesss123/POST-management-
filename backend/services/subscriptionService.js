@@ -4,6 +4,7 @@
  */
 const { db } = require('../config/db');
 const { generateUuid } = require('../utils/identifier');
+const platformSettingsService = require('./platformSettingsService');
 
 /**
  * Resolves the effective subscription status based on stored dates and status overrides.
@@ -90,8 +91,9 @@ const markPaymentReceived = async (shopId, payload, userId) => {
         const newEndDate = new Date(baseDate);
         newEndDate.setMonth(newEndDate.getMonth() + parseInt(months));
 
+        const graceDays = platformSettingsService.getInt('grace_days', 7);
         const newGraceUntil = new Date(newEndDate);
-        newGraceUntil.setDate(newGraceUntil.getDate() + 7);
+        newGraceUntil.setDate(newGraceUntil.getDate() + graceDays);
 
         // 1. Update Shop
         await connection.query(
@@ -164,7 +166,8 @@ const extendSubscription = async (shopId, payload, userId) => {
         if (months) newEndDate.setMonth(newEndDate.getMonth() + parseInt(months));
 
         const newGraceUntil = new Date(newEndDate);
-        newGraceUntil.setDate(newGraceUntil.getDate() + 7);
+        const graceDays = platformSettingsService.getInt('grace_days', 7);
+        newGraceUntil.setDate(newGraceUntil.getDate() + graceDays);
 
         await connection.query(
             'UPDATE shops SET subscription_end_date = ?, grace_until = ?, subscription_status = "active" WHERE id = ?',

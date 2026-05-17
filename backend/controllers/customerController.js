@@ -233,6 +233,7 @@ exports.getAccountDetails = exports.getCustomerLedger;
 // @route   PATCH /api/customers/:id/status
 // @access  Private/Admin
 exports.updateCustomerStatus = async (req, res) => {
+    const { status } = req.body;
     try {
         const where = buildIdOrUuidWhere(null, req.params.id);
         const [oldCust] = await db.query(`SELECT id, status FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
@@ -256,58 +257,14 @@ exports.updateCustomerStatus = async (req, res) => {
 // @route   GET /api/customers/:id/loyalty
 // @access  Private
 exports.getLoyaltyHistory = async (req, res) => {
-    try {
-        const where = buildIdOrUuidWhere('c', req.params.id);
-        const [customers] = await db.query(`SELECT id FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
-        if (customers.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
-        const customerId = customers[0].id;
-
-        const [history] = await db.query(`
-            SELECT lt.*, i.invoice_no, i.uuid as invoice_uuid, u.name as created_by_name
-            FROM loyalty_transactions lt
-            LEFT JOIN invoices i ON lt.invoice_id = i.id
-            LEFT JOIN users u ON lt.created_by = u.id
-            WHERE lt.customer_id = ? AND lt.shop_id = ?
-            ORDER BY lt.created_at DESC
-        `, [customerId, req.shopId]);
-
-        res.json({ success: true, data: history });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
+    // Loyalty system decommissioned
+    res.json({ success: true, data: [] });
 };
 
 // @desc    Adjust loyalty points
 // @route   POST /api/customers/:id/loyalty/adjust
 // @access  Private/Admin
 exports.adjustLoyaltyPoints = async (req, res) => {
-    const { points, description } = req.body;
-    const loyaltyService = require('../services/loyaltyService');
-    const connection = await db.getConnection();
-
-    try {
-        await connection.beginTransaction();
-        const where = buildIdOrUuidWhere('c', req.params.id);
-        const [customers] = await connection.query(`SELECT id FROM customers WHERE ${where.query} AND shop_id = ?`, [where.value, req.shopId]);
-        if (customers.length === 0) throw new Error('Customer not found');
-        const customerId = customers[0].id;
-
-        await loyaltyService.addPoints(connection, {
-            customerId,
-            amount: parseFloat(points), // For adjust, amount IS points
-            type: 'adjust',
-            description,
-            userId: req.user.id,
-            shopId: req.shopId
-        });
-
-        await connection.commit();
-        res.json({ success: true, message: 'Points adjusted successfully' });
-    } catch (error) {
-        await connection.rollback();
-        res.status(500).json({ success: false, message: error.message || 'Server error' });
-    } finally {
-        connection.release();
-    }
+    // Loyalty system decommissioned
+    res.json({ success: true, message: 'Loyalty system is disabled' });
 };

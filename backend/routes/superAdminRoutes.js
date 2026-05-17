@@ -22,6 +22,8 @@ router.post('/shops', saController.createShop);
 router.get('/shops/:identifier', saController.getShopById);
 router.put('/shops/:id', saController.updateShop);
 router.patch('/shops/:id/status', saController.updateShopStatus);
+router.patch('/shops/:id/delivery-permission', saController.updateDeliveryPermission);
+router.patch('/shops/:id/feature-permission', saController.updateFeaturePermission);
 router.get('/shops/:id/usage', saController.getShopUsage);
 router.post('/shops/:id/create-admin', saController.createShopAdmin);
 
@@ -57,6 +59,7 @@ router.put('/platform-settings', saController.updatePlatformSettings);
 // Subscription Plans (CRUD)
 const planController = require('../controllers/subscriptionPlanController');
 router.get('/plans', planController.getPlans);
+router.get('/plans/:id', planController.getPlanById);
 router.post('/plans', planController.createPlan);
 router.put('/plans/:id', planController.updatePlan);
 router.delete('/plans/:id', planController.deletePlan);

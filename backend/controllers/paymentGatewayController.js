@@ -23,37 +23,68 @@ exports.createQRRequest = async (req, res) => {
 
         await connection.beginTransaction();
 
+        // 0. Resolve session_id and held_bill_id if they are UUIDs
+        let resolvedSessionId = session_id;
+        if (session_id) {
+            const sessionWhere = buildIdOrUuidWhere('s', session_id);
+            const [sessionRow] = await connection.query(`SELECT id FROM table_sessions s WHERE ${sessionWhere.query} AND s.shop_id = ?`, [sessionWhere.value, req.shopId]);
+            if (sessionRow.length > 0) {
+                resolvedSessionId = sessionRow[0].id;
+            } else {
+                console.warn(`[QR] Session resolution failed for: ${session_id} (Shop: ${req.shopId})`);
+            }
+        }
+
+        let resolvedHeldBillId = held_bill_id;
+        if (held_bill_id) {
+            const heldWhere = buildIdOrUuidWhere('h', held_bill_id);
+            const [heldRow] = await connection.query(`SELECT id FROM held_bills h WHERE ${heldWhere.query} AND h.shop_id = ?`, [heldWhere.value, req.shopId]);
+            if (heldRow.length > 0) {
+                resolvedHeldBillId = heldRow[0].id;
+            } else {
+                console.warn(`[QR] Held Bill resolution failed for: ${held_bill_id} (Shop: ${req.shopId})`);
+            }
+        }
+
         const settings = await getSystemSettings(connection, req.shopId);
         const invoice_no = generateInvoiceNo();
         
         let subtotal = 0;
         const processedItems = [];
 
-        // 1. Calculate subtotal (similar to invoiceController logic)
+        // 1. Calculate subtotal from real prices (Combo + Item handling)
         for (const itemInput of items) {
-            const [itemData] = await connection.query(
-                'SELECT id, name, price, status, availability_status, track_stock, stock_qty, no_receipt_default FROM items WHERE id = ? AND shop_id = ?', 
-                [itemInput.item_id || itemInput.id, req.shopId]
-            );
-            
-            if (itemData.length === 0) throw new Error(`Item ID ${itemInput.item_id || itemInput.id} not found`);
-            const item = itemData[0];
+            let realPrice = 0;
+            let realName = '';
+            let noReceiptItem = false;
 
-            if (item.status !== 'active' || item.availability_status !== 'available') {
-                throw new Error(`Item ${item.name} is not available`);
+            if (itemInput.is_combo) {
+                const [comboData] = await connection.query('SELECT name, price FROM combo_meals WHERE id = ? AND shop_id = ?', [itemInput.id, req.shopId]);
+                if (comboData.length === 0) throw new Error(`Combo ID ${itemInput.id} not found`);
+                realPrice = comboData[0].price;
+                realName = comboData[0].name;
+            } else {
+                const [itemData] = await connection.query('SELECT name, price, no_receipt_default FROM items WHERE id = ? AND shop_id = ?', [itemInput.id, req.shopId]);
+                if (itemData.length === 0) throw new Error(`Item ID ${itemInput.id} not found`);
+                realPrice = itemData[0].price;
+                realName = itemData[0].name;
+                noReceiptItem = !!itemData[0].no_receipt_default;
             }
 
-            const itemUnitPrice = item.price; // Simplified for now, no modifiers in QR yet as per request
-            const itemTotal = itemUnitPrice * itemInput.qty;
+            const modifierTotal = parseFloat(itemInput.modifier_total) || 0;
+            const itemTotal = (realPrice + modifierTotal) * itemInput.qty;
             subtotal += itemTotal;
 
             processedItems.push({
-                item_id: item.id,
-                item_name: item.name,
+                item_id: itemInput.id,
+                item_name: realName,
                 qty: itemInput.qty,
-                unit_price: item.price,
+                unit_price: realPrice,
+                modifier_total: modifierTotal,
                 total: itemTotal,
-                no_receipt_item: !!item.no_receipt_default
+                item_type: itemInput.is_combo ? 'combo' : 'item',
+                no_receipt_item: noReceiptItem,
+                modifiers: itemInput.modifiers || []
             });
         }
 
@@ -66,7 +97,7 @@ exports.createQRRequest = async (req, res) => {
         }
 
         const discountedSubtotal = subtotal - discount_amount;
-        const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal);
+        const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal, req.shopId);
         const finalSubtotal = Math.max(0, discountedSubtotal - promotion_discount_amount);
 
         const taxEnabled = settings.tax_enabled === 'true';
@@ -87,14 +118,18 @@ exports.createQRRequest = async (req, res) => {
                 promotion_id, promotion_discount_amount,
                 tax_rate, tax_amount, service_charge_rate, service_charge_amount,
                 grand_total, paid_amount, balance_amount, created_by,
-                sale_channel, no_receipt, sale_type, shop_id
-            ) VALUES (?, ?, ?, ?, 'cash_sale', ?, ?, 'pending', 'qr', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'normal', false, 'restaurant', ?)`,
+                sale_channel, no_receipt, sale_type, shop_id,
+                currency_code, currency_symbol, tax_name, tax_inclusive,
+                receipt_restaurant_name, receipt_restaurant_phone, receipt_restaurant_address, receipt_footer_message, receipt_logo_url
+            ) VALUES (?, ?, ?, ?, 'cash_sale', ?, ?, 'pending', 'qr', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'normal', false, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                invoiceUuid, invoice_no, customer_id || null, session_id || null, order_type, waiter_id || req.user.id,
+                invoiceUuid, invoice_no, customer_id || null, resolvedSessionId || null, order_type, waiter_id || req.user.id,
                 subtotal, discount_type || 'fixed', discount_value || 0, discount_amount,
                 promotion_id || null, promotion_discount_amount,
                 taxRate, taxAmount, scRate, scAmount,
-                grand_total, grand_total, req.user.id, req.shopId
+                grand_total, grand_total, req.user.id, req.shopId,
+                settings.currency_code || 'LKR', settings.currency_symbol || 'Rs.', settings.tax_name || 'VAT', settings.tax_inclusive === 'true' ? 1 : 0,
+                settings.restaurant_name || settings.shop_name, settings.restaurant_phone, settings.restaurant_address, settings.receipt_footer_message, settings.receipt_logo_url
             ]
         );
         const invoiceId = invoiceResult.insertId;
@@ -102,9 +137,9 @@ exports.createQRRequest = async (req, res) => {
         // 4. Insert Invoice Items
         for (const item of processedItems) {
             await connection.query(
-                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, total, no_receipt_item, shop_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [generateUuid(), invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.total, item.no_receipt_item ? 1 : 0, req.shopId]
+                `INSERT INTO invoice_items (uuid, invoice_id, item_id, item_name, qty, unit_price, modifier_total, total, no_receipt_item, shop_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [generateUuid(), invoiceId, item.item_id, item.item_name, item.qty, item.unit_price, item.modifier_total, item.total, item.no_receipt_item ? 1 : 0, req.shopId]
             );
         }
 
@@ -126,7 +161,7 @@ exports.createQRRequest = async (req, res) => {
                 gateway_order_id, qr_payload, qr_image_url, expires_at, request_payload, created_by, shop_id
             ) VALUES (?, ?, ?, ?, ?, 'qr', ?, 'LKR', 'pending', ?, ?, ?, ?, ?, ?, ?)`,
             [
-                transactionUuid, invoiceId, held_bill_id || null, session_id || null, providerName, grand_total, 
+                transactionUuid, invoiceId, resolvedHeldBillId || null, resolvedSessionId || null, providerName, grand_total, 
                 gatewayRequest.gateway_order_id, gatewayRequest.qr_payload, 
                 gatewayRequest.qr_image_url, gatewayRequest.expires_at, 
                 JSON.stringify({ items: processedItems }), req.user.id, req.shopId

@@ -44,10 +44,13 @@ import KOTPrintModal from '../components/invoice/KOTPrintModal';
 import AddToCustomerAccountModal from '../components/naya/AddToCustomerAccountModal';
 import ItemModifierModal from '../components/pos/ItemModifierModal';
 import PaymentQRModal from '../components/PaymentQRModal';
+import QuickCashModal from '../components/pos/QuickCashModal';
 import { gatewayPaymentApi } from '../api/api';
 import { cn } from '../utils/cn';
+import { useAuth } from '../context/AuthContext';
 
 const TableBillingPage = () => {
+  const { user } = useAuth();
   const toast = useToast();
   const [tables, setTables] = useState([]);
   const [items, setItems] = useState([]);
@@ -124,6 +127,9 @@ const TableBillingPage = () => {
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrTransactionData, setQrTransactionData] = useState(null);
   const [loyaltyPointsRedeem, setLoyaltyPointsRedeem] = useState(0);
+  const [showQuickCashModal, setShowQuickCashModal] = useState(false);
+  const [showAddTableModal, setShowAddTableModal] = useState(false);
+  const [newTableNo, setNewTableNo] = useState('');
 
   const toNumber = (val) => parseFloat(val) || 0;
 
@@ -151,7 +157,18 @@ const TableBillingPage = () => {
       
       const mainCats = [...new Set(activeItems.map(i => i.main_category).filter(Boolean))];
       setMainCategories(mainCats);
+
+      // Handle Resumption from Parked Bills Page
+      const resumeTableId = localStorage.getItem('resume_table_id');
+      if (resumeTableId && tRes.data?.data?.length > 0) {
+          const targetTable = tRes.data.data.find(t => t.id === parseInt(resumeTableId));
+          if (targetTable) {
+              handleSelectTable(targetTable);
+              localStorage.removeItem('resume_table_id');
+          }
+      }
     } catch (err) {
+      console.error('FetchData Error:', err);
       toast.error('Failed to load data');
     } finally {
       setLoading(false);
@@ -194,6 +211,23 @@ const TableBillingPage = () => {
     fetchShiftStatus();
     fetchWaiters();
   }, []);
+
+  const handleCreateNewTable = async (e) => {
+      e.preventDefault();
+      if (!newTableNo) return;
+      try {
+          setProcessing(true);
+          await tableApi.create({ table_no: newTableNo });
+          toast.success('New table added successfully');
+          setNewTableNo('');
+          setShowAddTableModal(false);
+          fetchData(); // Refresh table list
+      } catch (err) {
+          toast.error('Failed to add table');
+      } finally {
+          setProcessing(false);
+      }
+  };
 
   useEffect(() => {
     if (showCheckoutModal || showSplitModal) {
@@ -291,22 +325,38 @@ const TableBillingPage = () => {
     }
   };
 
-  const handleQuickCash = async () => {
+  const handleQuickCash = () => {
     if (!activeSession || currentTotals.subtotal === 0) return;
-    
-    if (!window.confirm(`Process QUICK CASH payment for Rs. ${currentTotals.grandTotal.toLocaleString()}?`)) return;
+    setShowQuickCashModal(true);
+  };
 
+  const handleConfirmQuickCash = async (receivedAmount) => {
     try {
         setProcessing(true);
+        if (cart.length > 0) {
+            const formattedCart = cart.map(i => ({
+                id: i.id,
+                item_id: i.id,
+                qty: i.qty,
+                is_combo: i.is_combo || false,
+                special_note: i.special_note || null,
+                modifiers: i.modifiers || []
+            }));
+            await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+            // Optionally trigger KOT to clear the unsent items state
+            try { await kotApi.createFromSession(activeSession.id); } catch (e) { console.log("KOT auto-trigger skipped"); }
+        }
+
         const payload = {
             payment_method: 'cash',
-            cash_received: currentTotals.grandTotal,
+            cash_received: receivedAmount,
             discount_type: 'fixed',
             discount_value: 0
         };
         const { data } = await sessionApi.payNow(activeSession.uuid || activeSession.id, payload);
         if (data.success) {
             toast.success('Payment completed successfully!');
+            setShowQuickCashModal(false);
             setActiveSession(null);
             setSessionItems([]);
             setCart([]);
@@ -329,16 +379,24 @@ const TableBillingPage = () => {
   };
 
   const confirmModifiers = (modifiedItem) => {
+    // Normalize fields for consistency with sessionItems and billing UI
+    const normalizedItem = {
+        ...modifiedItem,
+        item_id: modifiedItem.item_id || modifiedItem.id,
+        item_name: modifiedItem.item_name || modifiedItem.name,
+        unit_price: modifiedItem.unit_price || modifiedItem.price
+    };
+
     setCart(prev => {
         if (editingItemIndex !== null) {
-            return prev.map((item, idx) => idx === editingItemIndex ? modifiedItem : item);
+            return prev.map((item, idx) => idx === editingItemIndex ? normalizedItem : item);
         }
-        return [...prev, modifiedItem];
+        return [...prev, normalizedItem];
     });
 
     setRecentItems(prev => {
-        const filtered = prev.filter(i => i.id !== modifiedItem.id);
-        return [{...modifiedItem}, ...filtered].slice(0, 5);
+        const filtered = prev.filter(i => i.id !== normalizedItem.id);
+        return [{...normalizedItem}, ...filtered].slice(0, 5);
     });
     
     toast.success(`${modifiedItem.name} added`, { duration: 1000, position: 'bottom-center' });
@@ -352,31 +410,30 @@ const TableBillingPage = () => {
       setShowModifierModal(true);
   };
 
-  const updateCartQty = (id, delta, is_combo = false) => {
-    setCart(prev => prev.map(i => (i.item_id === id && i.is_combo === is_combo) ? { ...i, qty: Math.max(1, i.qty + delta) } : i));
+  const updateCartQty = (index, delta) => {
+    setCart(prev => prev.map((item, i) => i === index ? { ...item, qty: Math.max(1, item.qty + delta) } : item));
   };
 
-  const updateCartNote = (id, note, is_combo = false) => {
-    setCart(prev => prev.map(i => (i.item_id === id && i.is_combo === is_combo) ? { ...i, note } : i));
+  const removeFromCart = (index) => {
+    setCart(prev => prev.filter((_, i) => i !== index));
   };
-
-  const removeFromCart = (id, is_combo = false) => setCart(prev => prev.filter(i => !(i.item_id === id && i.is_combo === is_combo)));
 
   const sendToKitchen = async () => {
-      if (cart.length === 0) return;
+      if (cart.length === 0 && !sessionItems.some(i => !i.kot_sent && i.status !== 'voided')) return;
       setProcessing(true);
       try {
-          // 1. Add items to session first
-          const formattedCart = cart.map(i => ({
-              id: i.id,
-              item_id: i.id,
-              qty: i.qty,
-              is_combo: i.is_combo || false,
-              special_note: i.special_note || null,
-              modifiers: i.modifiers || []
-          }));
-          
-          await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+          // 1. Add items to session if cart is not empty
+          if (cart.length > 0) {
+              const formattedCart = cart.map(i => ({
+                  item_id: i.item_id || i.id,
+                  qty: i.qty,
+                  is_combo: i.is_combo || false,
+                  special_note: i.special_note || null,
+                  modifiers: i.modifiers || []
+              }));
+              await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+          }
+
           // 2. Trigger KOT for all unsent items in session
           const { data } = await kotApi.createFromSession(activeSession.id);
           toast.success('Sent to kitchen successfully');
@@ -393,6 +450,31 @@ const TableBillingPage = () => {
       } finally {
           setProcessing(false);
       }
+  };
+
+  const handlePark = async () => {
+    try {
+        if (cart.length > 0) {
+            setProcessing(true);
+            const formattedCart = cart.map(i => ({
+                item_id: i.item_id || i.id,
+                qty: i.qty,
+                is_combo: i.is_combo || false,
+                special_note: i.special_note || null,
+                modifiers: i.modifiers || []
+            }));
+            await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+            setCart([]);
+            toast.success('Items parked/saved to table');
+        }
+        setShowCheckoutModal(false);
+        fetchData();
+        refreshSession(selectedTable.id);
+    } catch (err) {
+        toast.error('Failed to park items');
+    } finally {
+        setProcessing(false);
+    }
   };
 
   const handleVoidItem = async () => {
@@ -463,6 +545,21 @@ const TableBillingPage = () => {
 
     setProcessing(true);
     try {
+        // Save cart items if not empty
+        if (cart.length > 0) {
+            const formattedCart = cart.map(i => ({
+                id: i.id,
+                item_id: i.id,
+                qty: i.qty,
+                is_combo: i.is_combo || false,
+                special_note: i.special_note || null,
+                modifiers: i.modifiers || []
+            }));
+            await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+            // Optionally trigger KOT
+            try { await kotApi.createFromSession(activeSession.id); } catch (e) { console.log("KOT auto-trigger skipped"); }
+        }
+
         const payload = {
             discount_type: discountType,
             discount_value: discountValue,
@@ -497,6 +594,19 @@ const TableBillingPage = () => {
   const handleAccountConfirm = async (customerId) => {
     setProcessing(true);
     try {
+        // Save cart items if not empty
+        if (cart.length > 0) {
+            const formattedCart = cart.map(i => ({
+                id: i.item_id || i.id,
+                item_id: i.item_id || i.id,
+                qty: i.qty,
+                is_combo: i.is_combo || false,
+                special_note: i.special_note || null,
+                modifiers: i.modifiers || []
+            }));
+            await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+        }
+
         const payload = {
             customer_id: customerId,
             discount_type: discountType,
@@ -528,14 +638,34 @@ const TableBillingPage = () => {
     
     setProcessing(true);
     try {
-        const payload = {
-            session_id: activeSession.uuid || activeSession.id,
-            items: [...sessionItems, ...cart].map(i => ({ 
-                item_id: i.item_id || i.id, 
+        // Save cart items if not empty
+        if (cart.length > 0) {
+            const formattedCart = cart.map(i => ({
+                id: i.item_id || i.id,
+                item_id: i.item_id || i.id,
                 qty: i.qty,
-                price: i.unit_price || i.price,
-                is_combo: i.is_combo || false
-            })),
+                is_combo: i.is_combo || false,
+                special_note: i.special_note || null,
+                modifiers: i.modifiers || []
+            }));
+            await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+            // Optionally trigger KOT
+            try { await kotApi.createFromSession(activeSession.id); } catch (e) { console.log("KOT auto-trigger skipped"); }
+        }
+
+        const payload = {
+            session_id: activeSession.id || activeSession.uuid,
+            items: [...sessionItems.filter(i => i.status !== 'voided' && !i.billed), ...cart].map(i => {
+                const itemId = i.item_id || i.id || i.item?.id;
+                return { 
+                    id: itemId, 
+                    qty: i.qty,
+                    price: i.unit_price || i.price || i.item?.price,
+                    modifier_total: i.modifier_total || 0,
+                    is_combo: i.is_combo || false,
+                    modifiers: i.modifiers || []
+                };
+            }),
             discount_type: discountType,
             discount_value: discountValue,
             promotion_id: selectedPromo?.id || null,
@@ -544,6 +674,15 @@ const TableBillingPage = () => {
             loyalty_points_redeem: loyaltyPointsRedeem || 0,
             source: 'table_billing'
         };
+
+        // Validation: Ensure all items have a valid ID
+        const invalidItems = payload.items.filter(item => !item.id);
+        if (invalidItems.length > 0) {
+            console.error('Invalid items detected in QR payload:', invalidItems);
+            return toast.error('One or more items are invalid. Please refresh the table session.');
+        }
+
+        console.log('Final QR Payload:', payload);
 
         const res = await gatewayPaymentApi.createQR(payload);
         setQrTransactionData(res.data.data);
@@ -621,6 +760,19 @@ const TableBillingPage = () => {
     }
     setProcessing(true);
     try {
+        if (cart.length > 0) {
+            const formattedCart = cart.map(i => ({
+                id: i.id,
+                item_id: i.id,
+                qty: i.qty,
+                is_combo: i.is_combo || false,
+                special_note: i.special_note || null,
+                modifiers: i.modifiers || []
+            }));
+            await sessionApi.addItems(activeSession.uuid || activeSession.id, formattedCart);
+            try { await kotApi.createFromSession(activeSession.id); } catch (e) { console.log("KOT auto-trigger skipped"); }
+        }
+
         const payload = {
             split_type: splitType,
             payment_method: payments[0].payment_method || 'cash', // For equal/custom, we use primary payment method
@@ -645,12 +797,17 @@ const TableBillingPage = () => {
         setSelectedSplitItems([]);
         
         // If session closed, reset. Otherwise refresh.
-        if (res.data.data.session_closed) {
-            toast.info('Session fully closed');
+        // If session closed or split processed, we show the invoice
+        if (res.data.data.shouldClose || res.data.data.invoice) {
+            if (res.data.data.shouldClose) toast.info('Session fully closed');
             setLastInvoice(res.data.data.invoice);
             setShowPrintModal(true);
-            resetSale();
-            fetchData();
+            if (res.data.data.shouldClose) {
+                resetSale();
+                fetchData();
+            } else {
+                refreshSession(selectedTable.id);
+            }
         } else {
             refreshSession(selectedTable.id);
         }
@@ -716,6 +873,15 @@ const TableBillingPage = () => {
                     <Grid3X3 size={20} />
                 </div>
                 <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Restaurant Tables</h3>
+                {user?.role === 'admin' && (
+                    <button 
+                        onClick={() => setShowAddTableModal(true)}
+                        className="w-8 h-8 bg-emerald-500 text-white rounded-lg flex items-center justify-center hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100 active:scale-95 ml-2"
+                        title="Add Table"
+                    >
+                        <Plus size={18} strokeWidth={3} />
+                    </button>
+                )}
             </div>
             <div className="flex bg-slate-100/50 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
@@ -729,6 +895,33 @@ const TableBillingPage = () => {
                 </div>
             </div>
         </div>
+
+        {/* Parked Bills Quick List (RestoLedger Standard) */}
+        {tables.some(t => t.status === 'occupied') && (
+            <div className="mb-10 animate-in slide-in-from-top-4 duration-500">
+                <div className="flex items-center gap-2 mb-4">
+                    <History size={16} className="text-amber-500" />
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Active Parked Bills</h4>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                    {tables.filter(t => t.status === 'occupied').map(t => (
+                        <button 
+                            key={`parked-${t.id}`}
+                            onClick={() => handleSelectTable(t)}
+                            className="bg-amber-50 border border-amber-100 px-4 py-3 rounded-2xl flex items-center gap-3 hover:bg-amber-100 transition-all group"
+                        >
+                            <div className="w-8 h-8 bg-amber-500 text-white rounded-lg flex items-center justify-center font-black text-xs group-hover:scale-110 transition-transform">
+                                {t.table_no}
+                            </div>
+                            <div className="text-left">
+                                <p className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Parked Bill</p>
+                                <p className="text-xs font-black text-amber-900 leading-none">Table {t.table_no}</p>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        )}
 
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 sm:gap-4">
             {tables.map(table => (
@@ -775,23 +968,9 @@ const TableBillingPage = () => {
                         <div className="bg-indigo-50/50 p-6 sm:p-8 rounded-[32px] sm:rounded-[40px] text-center border-2 border-dashed border-indigo-100 flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px]">
                             <Utensils size={40} className="text-indigo-300 mb-4 sm:mb-6" />
                             <h3 className="text-xl sm:text-2xl font-black text-indigo-900 mb-1 sm:mb-2 uppercase tracking-tight">Table {selectedTable.table_no} is Available</h3>
-                            <p className="text-indigo-600 font-bold mb-6 sm:mb-8 uppercase text-[9px] sm:text-[10px] tracking-widest">Select order type to start session</p>
+                            <p className="text-indigo-600 font-bold mb-6 sm:mb-8 uppercase text-[9px] sm:text-[10px] tracking-widest">Select a waiter and start the session</p>
                             
                             <div className="w-full max-w-sm mb-6 sm:mb-8 space-y-4">
-                                <div className="grid grid-cols-2 gap-2 bg-white p-2 rounded-2xl border border-indigo-100 shadow-sm">
-                                    <button 
-                                        onClick={() => setOpenOrderType('dine_in')} 
-                                        className={cn("py-3 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2", openOrderType === 'dine_in' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:bg-slate-50')}
-                                    >
-                                        <UtensilsCrossed size={14} /> Dine-In
-                                    </button>
-                                    <button 
-                                        onClick={() => setOpenOrderType('takeaway')} 
-                                        className={cn("py-3 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2", openOrderType === 'takeaway' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:bg-slate-50')}
-                                    >
-                                        <ShoppingBag size={14} /> Takeaway
-                                    </button>
-                                </div>
                                 
                                 <div className="bg-white border border-indigo-100 rounded-2xl flex items-center px-4 py-1 shadow-sm">
                                     <UserCircle size={18} className="text-indigo-300 mr-2" />
@@ -1043,7 +1222,7 @@ const TableBillingPage = () => {
                                                 item.status === 'served' ? 'bg-emerald-100 text-emerald-700' : 
                                                 item.status === 'billed' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'
                                             )}>{item.status}</span>
-                                            {item.kot_sent && <span className="text-[8px] font-black text-indigo-600 uppercase flex items-center gap-1"><ChefHat size={10} /> KOT SENT</span>}
+                                            {!!item.kot_sent && <span className="text-[8px] font-black text-indigo-600 uppercase flex items-center gap-1"><ChefHat size={10} /> KOT SENT</span>}
                                         </div>
                                     </div>
                                     {item.status !== 'voided' && item.status !== 'billed' && !isSplitMode && (
@@ -1096,11 +1275,11 @@ const TableBillingPage = () => {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <div className="flex items-center bg-slate-100 rounded-lg overflow-hidden">
-                                                <button onClick={() => updateCartQty(item.item_id, -1, item.is_combo)} className="p-1.5 hover:bg-slate-200 text-slate-500"><Minus size={10} /></button>
+                                                <button onClick={() => updateCartQty(index, -1)} className="p-1.5 hover:bg-slate-200 text-slate-500"><Minus size={10} /></button>
                                                 <span className="w-5 text-center text-xs font-black">{item.qty}</span>
-                                                <button onClick={() => updateCartQty(item.item_id, 1, item.is_combo)} className="p-1.5 hover:bg-slate-200 text-slate-500"><Plus size={10} /></button>
+                                                <button onClick={() => updateCartQty(index, 1)} className="p-1.5 hover:bg-slate-200 text-slate-500"><Plus size={10} /></button>
                                             </div>
-                                            <button onClick={() => removeFromCart(item.item_id, item.is_combo)} className="p-1 text-slate-300 hover:text-rose-600"><Trash2 size={14} /></button>
+                                            <button onClick={() => removeFromCart(index)} className="p-1 text-slate-300 hover:text-rose-600"><Trash2 size={14} /></button>
                                         </div>
                                     </div>
                                 ))}
@@ -1133,7 +1312,7 @@ const TableBillingPage = () => {
                             variant="warning"
                             size="lg"
                             className="h-16 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-600 hover:text-white"
-                            disabled={cart.length === 0 || processing}
+                            disabled={(cart.length === 0 && !sessionItems.some(i => !i.kot_sent && i.status !== 'voided')) || processing}
                             onClick={sendToKitchen}
                             icon={ChefHat}
                         >
@@ -1295,313 +1474,146 @@ const TableBillingPage = () => {
         title="Finalize Table Checkout"
         size="xl"
       >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 py-6">
-            {/* Left Column: Bill Summary & Adjustments */}
-            <div className="space-y-8">
-                <div className="bg-slate-50 p-8 rounded-[40px] space-y-6 shadow-sm border border-slate-100">
-                    <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bill Summary</h4>
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                        <span className="text-sm font-black text-slate-600">Items Subtotal</span>
-                        <span className="text-lg font-black text-slate-900">Rs. {currentTotals.subtotal.toLocaleString()}</span>
-                    </div>
-                    
-                    {/* Discount Section */}
-                    <div className="space-y-3 pt-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Discount</label>
-                        <div className="flex gap-2">
-                            <div className="relative flex-1">
-                                <select 
-                                    value={discountType} 
-                                    onChange={(e) => setDiscountType(e.target.value)}
-                                    className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-black outline-none focus:border-indigo-600 shadow-sm appearance-none cursor-pointer"
-                                >
-                                    <option value="fixed">Fixed (Rs)</option>
-                                    <option value="percentage">Percent (%)</option>
-                                </select>
-                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronRight size={14} className="rotate-90" /></div>
+        <div className="max-w-md mx-auto py-4 space-y-6">
+            {/* Itemized Summary Section (Restored for Table Billing) */}
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 max-h-[180px] overflow-y-auto custom-scrollbar">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-3">Order Summary</p>
+                <div className="space-y-3">
+                    {[...sessionItems.filter(i => i.status !== 'voided' && !i.billed), ...cart].map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-start">
+                            <div className="space-y-0.5">
+                                <p className="text-[10px] font-black text-slate-700 uppercase leading-tight">{item.item_name}</p>
+                                <p className="text-[8px] font-bold text-slate-400">QTY: {item.qty} × Rs. {(item.unit_price || item.price || 0).toLocaleString()}</p>
                             </div>
-                            <input 
-                                type="number" 
-                                value={discountValue}
-                                onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
-                                className="flex-[1.5] bg-white border border-slate-200 rounded-2xl px-6 py-3 text-lg font-black text-slate-900 outline-none focus:border-indigo-600 shadow-sm"
-                                placeholder="0"
-                            />
+                            <span className="text-[10px] font-black text-slate-900">
+                                Rs. {(toNumber(item.qty) * toNumber(item.unit_price || item.price || 0)).toLocaleString()}
+                            </span>
                         </div>
-                    </div>
-
-                    {/* Tax & SC Toggles */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <button 
-                            onClick={() => setScEnabled(!scEnabled)}
-                            className={cn(
-                                "flex items-center justify-between p-4 rounded-2xl border-2 transition-all group",
-                                scEnabled ? "bg-indigo-50 border-indigo-600 text-indigo-900" : "bg-white border-slate-100 text-slate-400"
-                            )}
-                        >
-                            <span className="text-[9px] font-black uppercase leading-tight">Service<br/>Charge</span>
-                            <div className={cn("w-3 h-3 rounded-full shadow-inner transition-all", scEnabled ? "bg-indigo-600 scale-110" : "bg-slate-200")}></div>
-                        </button>
-                        <button 
-                            onClick={() => setTaxEnabled(!taxEnabled)}
-                            className={cn(
-                                "flex items-center justify-between p-4 rounded-2xl border-2 transition-all group",
-                                taxEnabled ? "bg-emerald-50 border-emerald-600 text-emerald-900" : "bg-white border-slate-100 text-slate-400"
-                            )}
-                        >
-                            <span className="text-[9px] font-black uppercase leading-tight">Government<br/>Tax</span>
-                            <div className={cn("w-3 h-3 rounded-full shadow-inner transition-all", taxEnabled ? "bg-emerald-600 scale-110" : "bg-slate-200")}></div>
-                        </button>
-                    </div>
-
-                    <div className="pt-6 border-t border-slate-200 space-y-3">
-                        {currentTotals.promoDiscount > 0 && (
-                            <div className="flex justify-between text-[10px] font-black text-rose-500 uppercase tracking-widest">
-                                <span>Promotion Applied</span>
-                                <span>- Rs. {currentTotals.promoDiscount.toLocaleString()}</span>
-                            </div>
-                        )}
-                        {currentTotals.loyaltyDiscountAmount > 0 && (
-                            <div className="flex justify-between text-[10px] font-black text-indigo-600 uppercase tracking-widest">
-                                <span>Loyalty Redemption</span>
-                                <span>- Rs. {currentTotals.loyaltyDiscountAmount.toLocaleString()}</span>
-                            </div>
-                        )}
-                        {scEnabled && (
-                            <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                                <span>Service Charge ({settings.service_charge_percentage || 10}%)</span>
-                                <span>+ Rs. {currentTotals.sc.toLocaleString()}</span>
-                            </div>
-                        )}
-                        <div className="flex flex-col pt-4">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Grand Total</span>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-xl font-black text-slate-400">Rs.</span>
-                                <span className="text-6xl font-black text-slate-900 tracking-tight">{currentTotals.grandTotal.toLocaleString()}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Customer Section */}
-                <div className="space-y-4 px-2">
-                    <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer (Optional)</label>
-                        {selectedCustomer && (
-                            <button onClick={() => setSelectedCustomer(null)} className="text-[10px] font-black text-rose-500 uppercase hover:underline flex items-center gap-1"><X size={12} /> Clear</button>
-                        )}
-                    </div>
-                    {selectedCustomer ? (
-                        <div className="space-y-3">
-                            <div className="p-6 bg-indigo-600 text-white rounded-[32px] flex justify-between items-center shadow-xl shadow-indigo-100 animate-in slide-in-from-left-4 relative overflow-hidden">
-                                <div className="relative z-10">
-                                    <p className="font-black text-base uppercase tracking-tight">{selectedCustomer.name}</p>
-                                    <p className="text-xs text-indigo-200 font-bold">{selectedCustomer.phone}</p>
-                                </div>
-                                <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center relative z-10"><Users size={24} /></div>
-                                <div className="absolute -right-4 -bottom-4 w-20 h-20 bg-white/10 rounded-full blur-2xl"></div>
-                            </div>
-                            
-                            <div className="p-5 bg-white border-2 border-indigo-100 rounded-[32px] space-y-4 shadow-sm">
-                                <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-2">
-                                        <Star size={16} className="text-amber-500 fill-amber-500" />
-                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Available Points</span>
-                                    </div>
-                                    <span className="text-sm font-black text-indigo-600">{parseFloat(selectedCustomer.loyalty_points || 0).toFixed(0)} Pts</span>
-                                </div>
-                                
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="number" 
-                                        placeholder="Points to redeem..."
-                                        className="flex-1 bg-slate-50 border-none rounded-2xl px-4 py-3 text-sm font-black placeholder:text-slate-300 outline-none focus:bg-indigo-50 transition-all"
-                                        value={loyaltyPointsRedeem || ''}
-                                        onChange={(e) => {
-                                            const val = parseFloat(e.target.value) || 0;
-                                            if (val > parseFloat(selectedCustomer.loyalty_points)) return;
-                                            setLoyaltyPointsRedeem(val);
-                                        }}
-                                    />
-                                    <button 
-                                        onClick={() => setLoyaltyPointsRedeem(parseFloat(selectedCustomer.loyalty_points))}
-                                        className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all"
-                                    >
-                                        MAX
-                                    </button>
-                                </div>
-                                {currentTotals.loyaltyDiscountAmount > 0 && (
-                                    <div className="text-center p-2 bg-indigo-50 rounded-xl">
-                                        <p className="text-[10px] font-black text-indigo-600 uppercase">Discount: Rs. {currentTotals.loyaltyDiscountAmount.toLocaleString()}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="relative group">
-                            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={20} />
-                            <input 
-                                type="text" 
-                                placeholder="Search customer for credit/loyalty..." 
-                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-[24px] py-4 pl-14 pr-6 text-sm font-black text-slate-900 outline-none focus:bg-white focus:border-indigo-600 transition-all shadow-sm"
-                                value={customerSearch}
-                                onChange={(e) => {
-                                    setCustomerSearch(e.target.value);
-                                    if (customers.length === 0) fetchCustomers();
-                                }}
-                            />
-                            {customerSearch && (
-                                <div className="absolute top-full left-0 w-full bg-white border border-slate-100 rounded-3xl mt-2 shadow-2xl z-50 max-h-60 overflow-y-auto custom-scrollbar p-2 animate-in fade-in slide-in-from-top-2">
-                                    {filteredCustomers.length > 0 ? filteredCustomers.map(c => (
-                                        <button 
-                                            key={c.id} 
-                                            onClick={() => {setSelectedCustomer(c); setCustomerSearch('');}}
-                                            className="w-full text-left p-4 hover:bg-indigo-50 rounded-2xl transition-all flex items-center justify-between group"
-                                        >
-                                            <div>
-                                                <p className="text-sm font-black text-slate-800 uppercase tracking-tight group-hover:text-indigo-600 transition-colors">{c.name}</p>
-                                                <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-400 transition-colors">{c.phone}</p>
-                                            </div>
-                                            <ChevronRight size={16} className="text-slate-300 group-hover:text-indigo-400" />
-                                        </button>
-                                    )) : (
-                                        <div className="p-4 text-center text-xs font-bold text-slate-400">No customers found</div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
+                    ))}
+                    {sessionItems.length === 0 && cart.length === 0 && (
+                        <p className="text-[10px] font-bold text-slate-300 text-center py-4 uppercase italic">No items to bill</p>
                     )}
                 </div>
             </div>
 
-            {/* Right Column: Payment Methods */}
-            <div className="flex flex-col">
-                <div className="flex items-center justify-between mb-6">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Payment Details</h4>
-                    <button 
-                        onClick={handleAddPaymentRow}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest"
+            {/* Totals Section (Quick Sale Style) */}
+            <div className="space-y-1 border-b border-slate-100 pb-4">
+                <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span>Subtotal</span>
+                    <span>Rs. {currentTotals.subtotal.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span>Tax & S.Charge</span>
+                    <span>Rs. {(currentTotals.tax + currentTotals.sc).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center pt-4">
+                    <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Payable Amount</span>
+                    <span className="text-4xl font-black text-indigo-600">Rs. {currentTotals.grandTotal.toLocaleString()}</span>
+                </div>
+            </div>
+
+            {/* Payment Methods (Large Blocks) */}
+            <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        onClick={() => handleUpdatePayment(0, 'payment_method', 'cash')}
+                        className={cn(
+                            "flex items-center justify-center gap-3 py-5 rounded-xl border-2 transition-all font-black text-xs tracking-widest shadow-sm",
+                            payments[0]?.payment_method === 'cash' 
+                                ? "bg-emerald-600 border-emerald-600 text-white" 
+                                : "bg-white border-slate-100 text-slate-600 hover:border-emerald-200"
+                        )}
                     >
-                        <Plus size={16} />
-                        Add Method
+                        <Wallet size={18} />
+                        CASH
+                    </button>
+                    <button
+                        onClick={() => handleUpdatePayment(0, 'payment_method', 'card')}
+                        className={cn(
+                            "flex items-center justify-center gap-3 py-5 rounded-xl border-2 transition-all font-black text-xs tracking-widest shadow-sm",
+                            payments[0]?.payment_method === 'card' 
+                                ? "bg-white border-indigo-600 text-indigo-600" 
+                                : "bg-white border-slate-100 text-slate-600 hover:border-indigo-200"
+                        )}
+                    >
+                        <CircleDollarSign size={18} />
+                        CARD
                     </button>
                 </div>
                 
-                <div className="flex-1 space-y-4 max-h-[450px] overflow-y-auto pr-2 custom-scrollbar pb-6">
-                    {payments.map((p, idx) => (
-                        <div key={idx} className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 relative group animate-in slide-in-from-right-4 duration-300 shadow-sm">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="text-[8px] font-black text-slate-400 uppercase ml-2 tracking-widest">Method</label>
-                                    <div className="relative">
-                                        <select 
-                                            value={p.payment_method} 
-                                            onChange={(e) => handleUpdatePayment(idx, 'payment_method', e.target.value)}
-                                            className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-black outline-none focus:border-indigo-600 shadow-sm appearance-none"
-                                        >
-                                            <option value="cash">Cash</option>
-                                            <option value="card">Card</option>
-                                            <option value="bank">Bank Transfer</option>
-                                            <option value="qr">QR / Online</option>
-                                        </select>
-                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronRight size={12} className="rotate-90" /></div>
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[8px] font-black text-slate-400 uppercase ml-2 tracking-widest">Amount</label>
-                                    <input 
-                                        type="number" 
-                                        value={p.amount}
-                                        onChange={(e) => handleUpdatePayment(idx, 'amount', e.target.value)}
-                                        className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm font-black text-slate-900 outline-none focus:border-indigo-600 shadow-sm"
-                                        placeholder="0"
-                                    />
-                                </div>
-                            </div>
-                            <div className="mt-4 space-y-2">
-                                <label className="text-[8px] font-black text-slate-400 uppercase ml-2 tracking-widest">Ref No / Note</label>
-                                <input 
-                                    type="text" 
-                                    placeholder="Optional reference..."
-                                    value={p.reference_no}
-                                    onChange={(e) => handleUpdatePayment(idx, 'reference_no', e.target.value)}
-                                    className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-[10px] font-bold text-slate-900 outline-none focus:border-indigo-600 shadow-sm"
-                                />
-                            </div>
-                            {payments.length > 1 && (
-                                <button 
-                                    onClick={() => handleRemovePaymentRow(idx)}
-                                    className="absolute -top-2 -right-2 w-8 h-8 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-95"
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            )}
-                        </div>
+                <button
+                    onClick={handleQRCheckout}
+                    className="w-full flex items-center justify-center gap-3 py-5 rounded-xl bg-slate-50 border-2 border-slate-100 text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-slate-100 transition-all hover:border-indigo-600 hover:text-indigo-600"
+                >
+                    <Zap size={16} />
+                    QR PAY — TAP TO START
+                </button>
+            </div>
+
+            {/* Input Pad (The Gray Box) */}
+            <div className="bg-emerald-50/30 border border-emerald-100 rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-baseline gap-2">
+                        <span className="text-slate-300 font-black text-sm">Rs.</span>
+                        <input 
+                            type="number" 
+                            value={payments[0]?.amount}
+                            onChange={(e) => handleUpdatePayment(0, 'amount', e.target.value)}
+                            className="bg-transparent text-3xl font-black text-slate-900 outline-none w-32"
+                            placeholder="0.00"
+                            autoFocus
+                        />
+                    </div>
+                    <div className="text-right">
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Change</p>
+                        <p className={cn("text-xl font-black", (parseFloat(payments[0]?.amount) >= currentTotals.grandTotal) ? "text-emerald-600" : "text-slate-300")}>
+                            Rs. {Math.max(0, (parseFloat(payments[0]?.amount) || 0) - currentTotals.grandTotal).toLocaleString()}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-5 gap-2">
+                    <button onClick={() => handleUpdatePayment(0, 'amount', currentTotals.grandTotal.toString())} className="py-2 bg-indigo-50/50 rounded-lg text-[8px] font-black uppercase text-indigo-600 hover:bg-indigo-100 transition-all">EXACT</button>
+                    {[100, 500, 1000].map(v => (
+                        <button key={v} onClick={() => handleUpdatePayment(0, 'amount', ((parseFloat(payments[0]?.amount) || 0) + v).toString())} className="py-2 bg-indigo-50/50 rounded-lg text-[8px] font-black uppercase text-indigo-600 hover:bg-indigo-100 transition-all">+{v}</button>
                     ))}
+                    <button onClick={() => handleUpdatePayment(0, 'amount', '0')} className="py-2 bg-indigo-50/50 rounded-lg text-[8px] font-black uppercase text-indigo-600 hover:bg-indigo-100 transition-all">CLR</button>
                 </div>
+            </div>
 
-                <div className="pt-6 space-y-6 mt-auto">
-                    <div className="flex justify-between items-center p-6 bg-slate-900 rounded-[32px] text-white shadow-2xl shadow-slate-200 relative overflow-hidden">
-                        <div className="relative z-10">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Balance Due</p>
-                            <p className="text-4xl font-black tracking-tight">
-                                Rs. {Math.max(0, currentTotals.grandTotal - payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0)).toLocaleString()}
-                            </p>
-                        </div>
-                        <div className="relative z-10">
-                            {currentTotals.grandTotal <= payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) ? (
-                                <div className="flex items-center gap-2 bg-emerald-500/20 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 animate-in zoom-in-95">
-                                    <CheckCircle2 size={18} />
-                                    <span className="text-[10px] font-black uppercase tracking-widest">Covered</span>
-                                </div>
-                            ) : (
-                                <div className="flex items-center gap-2 bg-amber-500/20 text-amber-400 px-4 py-2 rounded-full border border-amber-500/20">
-                                    <AlertCircle size={18} />
-                                    <span className="text-[10px] font-black uppercase tracking-widest">Partial</span>
-                                </div>
-                            )}
-                        </div>
-                        <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-indigo-600 opacity-10 rounded-full blur-3xl"></div>
+            {/* Final Bottom Grid (4 Blocks - Color Matched) */}
+            <div className="grid grid-cols-4 gap-2">
+                <button 
+                    onClick={handlePark}
+                    className="flex flex-col items-center justify-center gap-2 p-4 bg-amber-100 rounded-2xl border border-amber-200 hover:bg-amber-200 transition-all shadow-sm"
+                >
+                    <div className="w-8 h-8 rounded-full border-2 border-amber-600 flex items-center justify-center text-amber-600">
+                        <History size={14} />
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <AppButton 
-                            variant="primary" 
-                            size="xl" 
-                            className="bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 flex-col py-8" 
-                            icon={Wallet} 
-                            loading={processing}
-                            onClick={handleCheckoutPayNow}
-                        >
-                            <span className="text-xs font-black uppercase tracking-widest opacity-80 mb-1">Pay</span>
-                            NOW
-                        </AppButton>
-                        <AppButton 
-                            variant="credit" 
-                            size="xl" 
-                            className="bg-purple-600 hover:bg-purple-700 shadow-purple-200 flex-col py-8" 
-                            icon={BookOpen} 
-                            loading={processing}
-                            onClick={handleCheckoutCredit}
-                        >
-                            <span className="text-xs font-black uppercase tracking-widest opacity-80 mb-1">Add to</span>
-                            NAYA
-                        </AppButton>
-                    </div>
-                    <AppButton 
-                        variant="secondary" 
-                        size="lg" 
-                        className="w-full py-6 bg-indigo-50 border-2 border-indigo-100 text-indigo-700 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all rounded-[24px]" 
-                        icon={Zap} 
-                        loading={processing}
-                        onClick={handleQRCheckout}
-                    >
-                        GENERATE QR PAYMENT
-                    </AppButton>
-                </div>
+                    <span className="text-[8px] font-black text-amber-900 uppercase tracking-widest">Park</span>
+                </button>
+                <button 
+                    onClick={handleCheckoutCredit}
+                    className="flex flex-col items-center justify-center gap-2 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:bg-slate-50 transition-all"
+                >
+                    <span className="text-[8px] font-black text-purple-600 uppercase tracking-widest leading-tight text-center">Add to<br/>Account</span>
+                </button>
+                <button 
+                    onClick={handleCheckoutPayNow}
+                    disabled={processing}
+                    className="flex flex-col items-center justify-center gap-2 p-4 bg-slate-100 rounded-2xl border border-slate-200 hover:bg-slate-200 transition-all"
+                >
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-tight text-center">Complete<br/>& Print</span>
+                </button>
+                <button 
+                    onClick={() => {
+                        // Quick Cash logic: Just finalize without extra receipt steps if needed
+                        handleCheckoutPayNow();
+                    }}
+                    className="flex flex-col items-center justify-center gap-2 p-4 bg-emerald-500 rounded-2xl border border-emerald-600 shadow-lg hover:bg-emerald-600 transition-all"
+                >
+                    <span className="text-[8px] font-black text-white uppercase tracking-widest leading-tight text-center">Quick<br/>Cash<br/><span className="text-[6px] opacity-80">(No Receipt)</span></span>
+                </button>
             </div>
         </div>
       </AppModal>
@@ -1738,7 +1750,7 @@ const TableBillingPage = () => {
       <InvoicePrintModal 
         isOpen={showPrintModal} 
         onClose={() => setShowPrintModal(false)} 
-        invoice={lastInvoice ? { ...lastInvoice, settings } : null} 
+        invoice={lastInvoice ? (lastInvoice.settings ? lastInvoice : { ...lastInvoice, settings }) : null} 
       />
 
       <PaymentQRModal 
@@ -1831,6 +1843,14 @@ const TableBillingPage = () => {
         </div>
       </AppModal>
 
+      <QuickCashModal 
+        isOpen={showQuickCashModal}
+        onClose={() => setShowQuickCashModal(false)}
+        amount={currentTotals.grandTotal}
+        onConfirm={handleConfirmQuickCash}
+        processing={processing}
+      />
+
       <KOTPrintModal
         isOpen={showKOTModal}
         onClose={() => setShowKOTModal(false)}
@@ -1883,6 +1903,36 @@ const TableBillingPage = () => {
                 <AppButton variant="secondary" className="w-full" onClick={() => setShowKOTHistoryModal(false)}>Close</AppButton>
             </div>
         </div>
+      </AppModal>
+
+      <PaymentQRModal 
+            isOpen={showQRModal}
+            onClose={() => setShowQRModal(false)}
+            transactionData={qrTransactionData}
+            onSuccess={(data) => {
+                setShowQRModal(false);
+                handleSelectTable(selectedTable.id);
+                toast.success('Payment completed successfully');
+            }}
+      />
+      <AppModal
+        isOpen={showAddTableModal}
+        onClose={() => setShowAddTableModal(false)}
+        title="Add Restaurant Table"
+      >
+        <form onSubmit={handleCreateNewTable} className="space-y-6">
+            <FormInput 
+                label="Table Number / Name" 
+                placeholder="e.g. 05 or Balcony-1" 
+                required 
+                value={newTableNo} 
+                onChange={e => setNewTableNo(e.target.value)} 
+            />
+            <div className="flex gap-4 pt-4">
+                <AppButton variant="secondary" className="flex-1" type="button" onClick={() => setShowAddTableModal(false)}>Cancel</AppButton>
+                <AppButton variant="primary" className="flex-1" type="submit" loading={processing}>Create Table</AppButton>
+            </div>
+        </form>
       </AppModal>
     </div>
   );

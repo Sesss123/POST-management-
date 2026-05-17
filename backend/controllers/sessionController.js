@@ -374,7 +374,20 @@ exports.payNowCheckout = async (req, res) => {
         );
         const invoiceId = invoiceResult.insertId;
 
-        for (const p of payments) {
+        let finalPayments = payments;
+        if (!Array.isArray(finalPayments) && req.body.payment_method) {
+            finalPayments = [{
+                payment_method: req.body.payment_method,
+                amount: grandTotal,
+                reference_no: req.body.reference_no || null
+            }];
+        }
+
+        if (!Array.isArray(finalPayments)) {
+            throw new Error('Payment details are missing or invalid (payments must be an array)');
+        }
+
+        for (const p of finalPayments) {
             const payUuid = generateUuid();
             await connection.query(
                 `INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no, shop_id)
@@ -400,11 +413,31 @@ exports.payNowCheckout = async (req, res) => {
 
         await logAction(req.user.id, 'session_checkout_paid', 'invoice', invoiceId, null, { invoice_no, grandTotal });
 
+        // Get Full Invoice Details for Frontend
+        const [fullInvoices] = await connection.query(
+            `SELECT i.*, c.name as customer_name, t.table_no, u.name as created_by_name
+             FROM invoices i
+             LEFT JOIN customers c ON i.customer_id = c.id
+             LEFT JOIN restaurant_tables t ON i.table_id = t.id
+             LEFT JOIN users u ON i.created_by = u.id
+             WHERE i.id = ? AND i.shop_id = ?`,
+            [invoiceId, req.shopId]
+        );
+        const fullInvoice = fullInvoices[0];
+        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
+        fullInvoice.items = invoiceItems;
+
+        // Attach settings and explicit receipt fields to response
+        fullInvoice.settings = settings;
+        fullInvoice.receipt_restaurant_name = settings.restaurant_name || settings.shop_name;
+        fullInvoice.receipt_restaurant_address = settings.restaurant_address || settings.shop_address;
+        fullInvoice.receipt_restaurant_phone = settings.restaurant_phone || settings.shop_phone;
+
         await connection.commit();
         res.status(201).json({ 
             success: true, 
             message: 'Checkout completed', 
-            data: { id: invoiceId, uuid: invoiceUuid, invoice_no, grand_total: grandTotal } 
+            data: fullInvoice
         });
 
     } catch (error) {
@@ -512,7 +545,20 @@ exports.splitBill = async (req, res) => {
         );
         const invoiceId = invoiceResult.insertId;
 
-        for (const p of payments) {
+        let finalPayments = payments;
+        if (!Array.isArray(finalPayments) && req.body.payment_method) {
+            finalPayments = [{
+                payment_method: req.body.payment_method,
+                amount: grandTotal,
+                reference_no: req.body.reference_no || null
+            }];
+        }
+
+        if (!Array.isArray(finalPayments)) {
+            throw new Error('Payment details are missing or invalid (payments must be an array)');
+        }
+
+        for (const p of finalPayments) {
             const payUuid = generateUuid();
             await connection.query(
                 'INSERT INTO invoice_payments (uuid, invoice_id, payment_method, amount, reference_no, shop_id) VALUES (?, ?, ?, ?, ?, ?)',
@@ -573,8 +619,35 @@ exports.splitBill = async (req, res) => {
 
         await logAction(req.user.id, 'bill_split', 'invoice', invoiceId, null, { split_type, grandTotal });
 
+        // Get Full Invoice Details for Frontend
+        const [fullInvoices] = await connection.query(
+            `SELECT i.*, c.name as customer_name, t.table_no, u.name as created_by_name
+             FROM invoices i
+             LEFT JOIN customers c ON i.customer_id = c.id
+             LEFT JOIN restaurant_tables t ON i.table_id = t.id
+             LEFT JOIN users u ON i.created_by = u.id
+             WHERE i.id = ? AND i.shop_id = ?`,
+            [invoiceId, req.shopId]
+        );
+        const fullInvoice = fullInvoices[0];
+        const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
+        fullInvoice.items = invoiceItems;
+
+        // Attach settings and explicit receipt fields to response
+        fullInvoice.settings = settings;
+        fullInvoice.receipt_restaurant_name = settings.restaurant_name || settings.shop_name;
+        fullInvoice.receipt_restaurant_address = settings.restaurant_address || settings.shop_address;
+        fullInvoice.receipt_restaurant_phone = settings.restaurant_phone || settings.shop_phone;
+
         await connection.commit();
-        res.status(201).json({ success: true, message: 'Split bill processed', data: { id: invoiceId, uuid: invoiceUuid, invoice_no, shouldClose } });
+        res.status(201).json({ 
+            success: true, 
+            message: 'Split bill processed', 
+            data: { 
+                invoice: fullInvoice,
+                shouldClose 
+            } 
+        });
     } catch (error) {
         await connection.rollback();
         console.error('Split Bill Error:', error);

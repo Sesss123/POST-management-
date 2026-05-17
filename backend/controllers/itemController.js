@@ -444,3 +444,55 @@ exports.receiveStock = async (req, res) => {
         connection.release();
     }
 };
+// @desc    Sync popular items based on sales volume
+// @route   POST /api/items/sync-popular
+// @access  Private/Admin
+exports.syncPopularItems = async (req, res) => {
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // 1. Get top 8 items by quantity in the last 30 days
+        const [topItems] = await connection.query(`
+            SELECT item_id, SUM(qty) as total_qty 
+            FROM invoice_items ii
+            JOIN invoices i ON ii.invoice_id = i.id
+            WHERE i.shop_id = ? 
+            AND i.payment_status != 'cancelled'
+            AND i.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY item_id
+            ORDER BY total_qty DESC
+            LIMIT 8
+        `, [req.shopId]);
+
+        if (topItems.length === 0) {
+            await connection.rollback();
+            return res.json({ success: true, message: 'No sales data found to sync popular items.' });
+        }
+
+        const topItemIds = topItems.map(item => item.item_id);
+
+        // 2. Reset all is_popular to 0
+        await connection.query('UPDATE items SET is_popular = 0 WHERE shop_id = ?', [req.shopId]);
+
+        // 3. Set top items to is_popular = 1
+        await connection.query('UPDATE items SET is_popular = 1 WHERE id IN (?) AND shop_id = ?', [topItemIds, req.shopId]);
+
+        await connection.commit();
+
+        logAction(req.userId, req.shopId, 'items', 'sync_popular', null, { topItemIds });
+        cache.del(`items:${req.shopId}`);
+
+        res.json({ 
+            success: true, 
+            message: `Successfully marked ${topItemIds.length} top selling items as Popular.`,
+            data: topItemIds 
+        });
+    } catch (error) {
+        await connection.rollback();
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server error during sync' });
+    } finally {
+        connection.release();
+    }
+};

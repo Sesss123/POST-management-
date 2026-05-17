@@ -29,6 +29,8 @@ import { AppButton, useToast, AppModal, Skeleton } from '../components/ui';
 import PaymentQRModal from '../components/PaymentQRModal';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import { useNetwork } from '../hooks/useNetwork';
+import { saveOfflineDraft, getCachedMenu, cacheMenuData } from '../offline/offlineDb';
 import { cn } from '../utils/cn';
 
 const toNumber = (value, fallback = 0) => {
@@ -51,6 +53,7 @@ const QuickRetailPage = () => {
     const [cashReceived, setCashReceived] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' or 'card'
     const [orderType, setOrderType] = useState('takeaway'); // 'takeaway', 'delivery', 'dine-in'
+    const isOnline = useNetwork();
     
     // UI State
     const [mainCategories, setMainCategories] = useState([]);
@@ -68,10 +71,21 @@ const QuickRetailPage = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const { data } = await quickRetailApi.getQuickItems();
-            const activeItems = data.data || [];
+            let activeItems = [];
+            if (isOnline) {
+                const { data } = await quickRetailApi.getQuickItems();
+                activeItems = data.data || [];
+                // Save to IndexedDB cache
+                if (user?.shop_id) {
+                    await cacheMenuData(user.shop_id, activeItems);
+                }
+            } else {
+                if (user?.shop_id) {
+                    activeItems = await getCachedMenu(user.shop_id) || [];
+                }
+            }
+
             setItems(activeItems);
-            
             const mainCats = [...new Set(activeItems.map(i => i.main_category).filter(Boolean))];
             setMainCategories(mainCats);
         } catch (err) {
@@ -80,6 +94,12 @@ const QuickRetailPage = () => {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (!isOnline && paymentMethod !== 'cash') {
+            setPaymentMethod('cash'); // Force cash if offline drops
+        }
+    }, [isOnline]);
 
     const fetchShiftStatus = async () => {
         try {
@@ -159,14 +179,39 @@ const QuickRetailPage = () => {
         try {
             const payload = {
                 items: cart.map(i => ({
-                    item_id: i.id,
+                    id: i.id,
+                    item_id: i.id, // Support both formats for flexibility
+                    item_name: i.name,
                     qty: i.qty,
+                    unit_price: toNumber(i.price),
+                    is_combo: i.is_combo || false,
                     age_confirmed: i.age_confirmed || false
                 })),
                 payment_method: paymentMethod,
                 order_type: orderType,
                 cash_received: paymentMethod === 'cash' ? parseFloat(cashReceived) : total
             };
+
+            if (!isOnline) {
+                if (globalSettings?.offline_mode_enabled !== 'true') {
+                    setProcessing(false);
+                    return addToast('Offline Mode is disabled in settings.', 'danger');
+                }
+                await saveOfflineDraft({
+                    type: 'quick_retail',
+                    shop_id: user.shop_id,
+                    user_id: user.id,
+                    items: payload.items,
+                    payment_method: payload.payment_method,
+                    cash_received: payload.cash_received,
+                    estimated_total: total
+                });
+                addToast('Offline Draft Saved Successfully. Please sync when online.', 'success');
+                setCart([]);
+                setCashReceived('');
+                setProcessing(false);
+                return;
+            }
 
             if (paymentMethod === 'qr') {
                 const res = await gatewayPaymentApi.createQR({
@@ -365,7 +410,10 @@ const QuickRetailPage = () => {
                             </div>
                             <h3 className="text-xl font-black uppercase tracking-tight">Quick Sale</h3>
                         </div>
-                        <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <button 
+                            onClick={() => navigate('/quick-retail/history')}
+                            className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                        >
                             <History size={20} />
                         </button>
                     </div>
@@ -457,20 +505,22 @@ const QuickRetailPage = () => {
                                 <span className="font-black uppercase tracking-widest text-sm">Cash</span>
                             </button>
                             <button 
-                                onClick={() => setPaymentMethod('card')}
+                                onClick={() => isOnline && setPaymentMethod('card')}
+                                disabled={!isOnline}
                                 className={cn(
                                     "flex-1 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all border-2",
-                                    paymentMethod === 'card' ? "bg-slate-900 border-slate-900 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
+                                    !isOnline ? "opacity-50 cursor-not-allowed bg-slate-50" : paymentMethod === 'card' ? "bg-slate-900 border-slate-900 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
                                 )}
                             >
                                 <CreditCard size={20} />
                                 <span className="font-black uppercase tracking-widest text-sm">Card</span>
                             </button>
                             <button 
-                                onClick={() => setPaymentMethod('qr')}
+                                onClick={() => isOnline && setPaymentMethod('qr')}
+                                disabled={!isOnline}
                                 className={cn(
                                     "flex-1 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all border-2",
-                                    paymentMethod === 'qr' ? "bg-indigo-600 border-indigo-600 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
+                                    !isOnline ? "opacity-50 cursor-not-allowed bg-slate-50" : paymentMethod === 'qr' ? "bg-indigo-600 border-indigo-600 text-white shadow-lg" : "bg-white border-slate-100 text-slate-400"
                                 )}
                             >
                                 <Zap size={20} />
@@ -532,7 +582,9 @@ const QuickRetailPage = () => {
                                 )}
                             >
                                 <Zap size={20} />
-                                <span className="text-[7px] font-black uppercase text-center leading-tight">Quick<br/>Cash<br/>(No Receipt)</span>
+                                <span className="text-[7px] font-black uppercase text-center leading-tight">
+                                    {isOnline ? "Quick\nCash\n(No Receipt)" : "Save\nOffline\nDraft"}
+                                </span>
                             </button>
                         </div>
                     </div>

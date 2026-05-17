@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { db } = require('../config/db');
 const { generateUuid } = require('../utils/identifier');
 const { pipeline } = require('stream/promises');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 class LocalBackupService {
     /**
@@ -125,11 +126,40 @@ class LocalBackupService {
                         
                         console.log(`Backup completed successfully: ${finalName} (${sizeMb} MB)`);
 
+                        // AWS S3 Cloud Upload
+                        let s3Url = null;
+                        if (process.env.AWS_S3_BUCKET_NAME && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+                            try {
+                                console.log(`Starting S3 upload for ${finalName}...`);
+                                const s3Client = new S3Client({
+                                    region: process.env.AWS_REGION || 'us-east-1',
+                                    credentials: {
+                                        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                                        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+                                    }
+                                });
+                                
+                                const fileStream = fs.createReadStream(finalPath);
+                                const uploadParams = {
+                                    Bucket: process.env.AWS_S3_BUCKET_NAME,
+                                    Key: `backups/${finalName}`,
+                                    Body: fileStream,
+                                };
+                                
+                                await s3Client.send(new PutObjectCommand(uploadParams));
+                                s3Url = `s3://${process.env.AWS_S3_BUCKET_NAME}/backups/${finalName}`;
+                                console.log(`Successfully uploaded ${finalName} to S3.`);
+                            } catch (s3Err) {
+                                console.error('S3 Upload Failed:', s3Err.message);
+                                // We don't fail the local backup if S3 fails, just log it.
+                            }
+                        }
+
                         // Log to database
                         await db.query(
                             `INSERT INTO backup_logs (uuid, backup_type, file_name, local_path, status, error_message, file_size_mb, is_encrypted, encryption_method, created_by)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                            [logUuid, type, finalName, finalPath, 'success', null, sizeMb, isEncrypted, encryptionMethod, userId]
+                            [logUuid, type, finalName, finalPath, 'success', s3Url ? `Uploaded to S3: ${s3Url}` : null, sizeMb, isEncrypted, encryptionMethod, userId]
                         );
 
                         return resolve({ uuid: logUuid, fileName: finalName, filePath: finalPath, sizeMb, isEncrypted });
@@ -155,6 +185,35 @@ class LocalBackupService {
                 reject(new Error(errorMessage));
             });
         });
+    }
+
+    /**
+     * Get total storage used by backups
+     */
+    async getTotalStorageUsed() {
+        try {
+            const config = await this.getSettings();
+            const backupLocalDir = config.backup_local_dir || 'database/backups';
+            const backupDir = path.resolve(__dirname, '../../', backupLocalDir);
+            
+            if (!fs.existsSync(backupDir)) return 0;
+            
+            const files = fs.readdirSync(backupDir);
+            let totalBytes = 0;
+
+            files.forEach(file => {
+                if (file.endsWith('.sql') || file.endsWith('.gz') || file.endsWith('.enc')) {
+                    const filePath = path.join(backupDir, file);
+                    const stats = fs.statSync(filePath);
+                    totalBytes += stats.size;
+                }
+            });
+
+            return (totalBytes / (1024 * 1024)).toFixed(2);
+        } catch (error) {
+            console.warn('Failed to calculate backup storage:', error.message);
+            return 0;
+        }
     }
 
     /**

@@ -71,13 +71,16 @@ const KOTPrintModal = ({ isOpen, onClose, kot }) => {
                 position: absolute !important;
                 left: 0 !important;
                 top: 0 !important;
-                width: 100% !important;
+                width: 80mm !important;
                 margin: 0 !important;
                 padding: 0 !important;
+                background: white !important;
             }
             body {
                 visibility: hidden;
                 background: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
             .print-only, .print-only * {
                 visibility: visible;

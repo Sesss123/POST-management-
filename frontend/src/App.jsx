@@ -28,14 +28,18 @@ import SuppliersPage from './pages/SuppliersPage';
 import PurchasesPage from './pages/PurchasesPage';
 import UsersPage from './pages/UsersPage';
 import QuickRetailPage from './pages/QuickRetailPage';
+import QuickRetailHistoryPage from './pages/QuickRetailHistoryPage';
 import BusinessIntelligencePage from './pages/BusinessIntelligencePage';
 import ExpensesPage from './pages/ExpensesPage';
 import PublicMenuPage from './pages/PublicMenuPage';
 import PublicReceiptPage from './pages/PublicReceiptPage';
 import MarketingPage from './pages/MarketingPage';
 import DeliveryOrdersPage from './pages/DeliveryOrdersPage';
+import SystemAlertsPage from './pages/SystemAlertsPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import CashCollectionPage from './pages/CashCollectionPage';
+import OfflineDraftsPage from './pages/OfflineDraftsPage';
 
 // Super Admin Components
 import SuperAdminLayout from './components/layout/SuperAdminLayout';
@@ -43,6 +47,8 @@ import SuperAdminDashboard from './pages/super-admin/SuperAdminDashboard';
 import ShopsPage from './pages/super-admin/ShopsPage';
 import CreateShopPage from './pages/super-admin/CreateShopPage';
 import ShopDetailsPage from './pages/super-admin/ShopDetailsPage';
+import ShopModulesPage from './pages/super-admin/ShopModulesPage';
+import ShopAccessGovernancePage from './pages/super-admin/ShopAccessGovernancePage';
 import SuperAdminUsersPage from './pages/super-admin/SuperAdminUsersPage';
 import SystemHealthPage from './pages/super-admin/SystemHealthPage';
 import SuperAdminBackupsPage from './pages/super-admin/SuperAdminBackupsPage';
@@ -52,10 +58,14 @@ import SuperAdminAnalytics from './pages/super-admin/SuperAdminAnalytics';
 import SubscriptionsPage from './pages/super-admin/SubscriptionsPage';
 import SubscriptionPaymentsPage from './pages/super-admin/SubscriptionPaymentsPage';
 import SubscriptionPlansPage from './pages/super-admin/SubscriptionPlansPage';
+import PlanEditGovernancePage from './pages/super-admin/PlanEditGovernancePage';
 import AnnouncementsPage from './pages/super-admin/AnnouncementsPage';
+import CreateAnnouncementPage from './pages/super-admin/CreateAnnouncementPage';
 import SupportTicketsPage from './pages/super-admin/SupportTicketsPage';
+import TicketDetailsPage from './pages/super-admin/TicketDetailsPage';
 import ShopMenuManagementPage from './pages/super-admin/ShopMenuManagementPage';
 import SuperAdminSettingsPage from './pages/super-admin/SuperAdminSettingsPage';
+import FeaturePermissionsPage from './pages/super-admin/FeaturePermissionsPage';
 
 import { ToastProvider } from './components/ui/Feedback';
 import { useAuth } from './context/AuthContext';
@@ -111,12 +121,18 @@ function App() {
                 <Route path="shops" element={<ShopsPage />} />
                 <Route path="shops/new" element={<CreateShopPage />} />
                 <Route path="shops/:identifier" element={<ShopDetailsPage />} />
+                <Route path="shops/:identifier/modules" element={<ShopModulesPage />} />
+                <Route path="shops/:identifier/governance" element={<ShopAccessGovernancePage />} />
                 <Route path="shops/:id/menu" element={<ShopMenuManagementPage />} />
                 <Route path="subscriptions" element={<SubscriptionsPage />} />
                 <Route path="subscription-payments" element={<SubscriptionPaymentsPage />} />
                 <Route path="plans" element={<SubscriptionPlansPage />} />
+                <Route path="plans/:id/governance" element={<PlanEditGovernancePage />} />
+                <Route path="plans/new" element={<PlanEditGovernancePage />} />
                 <Route path="announcements" element={<AnnouncementsPage />} />
+                <Route path="announcements/new" element={<CreateAnnouncementPage />} />
                 <Route path="tickets" element={<SupportTicketsPage />} />
+                <Route path="tickets/:id" element={<TicketDetailsPage />} />
                 <Route path="users" element={<SuperAdminUsersPage />} />
                 <Route path="system-health" element={<SystemHealthPage />} />
                 <Route path="health" element={<Navigate to="/super-admin/system-health" replace />} />
@@ -124,6 +140,7 @@ function App() {
                 <Route path="analytics" element={<SuperAdminAnalytics />} />
                 <Route path="audit-logs" element={<SuperAdminAuditLogsPage />} />
                 <Route path="security" element={<SuperAdminSecurityPage />} />
+                <Route path="permissions" element={<FeaturePermissionsPage />} />
                 <Route path="settings" element={<SuperAdminSettingsPage />} />
               </Route>
               
@@ -145,6 +162,7 @@ function App() {
                 <Route path="shifts" element={<RoleRoute roles={['admin', 'cashier']} element={<ShiftPage />} />} />
                 <Route path="held-bills" element={<RoleRoute roles={['admin', 'cashier']} element={<HeldBillsPage />} />} />
                 <Route path="reports/eod" element={<RoleRoute roles={['admin']} element={<EODReportPage />} />} />
+                <Route path="reports/cash-collection" element={<RoleRoute roles={['admin']} element={<CashCollectionPage />} />} />
                 <Route path="audit-logs" element={<RoleRoute roles={['admin']} element={<AuditLogsPage />} />} />
                 <Route path="business-intelligence" element={<RoleRoute roles={['admin']} element={<BusinessIntelligencePage />} />} />
                 <Route path="settings" element={<RoleRoute roles={['admin']} element={<SettingsPage />} />} />
@@ -152,9 +170,12 @@ function App() {
                 <Route path="suppliers" element={<RoleRoute roles={['admin']} element={<SuppliersPage />} />} />
                 <Route path="purchases" element={<RoleRoute roles={['admin']} element={<PurchasesPage />} />} />
                 <Route path="quick-retail" element={<RoleRoute roles={['admin', 'cashier']} element={<QuickRetailPage />} />} />
-                <Route path="expenses" element={<RoleRoute roles={['admin', 'cashier']} element={<ExpensesPage />} />} />
+                <Route path="quick-retail/history" element={<RoleRoute roles={['admin', 'cashier']} element={<QuickRetailHistoryPage />} />} />
+                <Route path="expenses" element={<RoleRoute roles={['admin']} element={<ExpensesPage />} />} />
                 <Route path="marketing" element={<RoleRoute roles={['admin']} element={<MarketingPage />} />} />
                 <Route path="delivery-orders" element={<RoleRoute roles={['admin', 'cashier']} element={<DeliveryOrdersPage />} />} />
+                <Route path="system-alerts" element={<RoleRoute roles={['admin']} element={<SystemAlertsPage />} />} />
+                <Route path="offline-drafts" element={<RoleRoute roles={['admin', 'cashier']} element={<OfflineDraftsPage />} />} />
                 
                 {/* Fallback for other pages */}
                 <Route path="*" element={<div className="p-8 text-center text-slate-400">Page under development</div>} />

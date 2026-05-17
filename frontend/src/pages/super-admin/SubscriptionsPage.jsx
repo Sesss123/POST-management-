@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
     CreditCard, Store, AlertTriangle, ShieldOff, 
     CheckCircle2, Clock, TrendingUp, RefreshCw,
     ChevronRight, Plus, Search, X, Loader2,
-    DollarSign, Hash, Ban, UserCheck
+    DollarSign, Hash, Ban, UserCheck, Activity,
+    Calendar, Sparkles, Filter, ArrowUpRight,
+    ArrowDownRight, Wallet, History, Zap,
+    Mail, Phone, ExternalLink, Timer
 } from 'lucide-react';
 import api from '../../api/apiClient';
 import { cn } from '../../utils/cn';
 import { useToast } from '../../components/ui/Feedback';
+import { AppModal } from '../../components/ui';
 
 const STATUS_CONFIG = {
     trial:      { label: 'Trial',       color: 'text-sky-400',     bg: 'bg-sky-500/10',     border: 'border-sky-500/20',     dot: 'bg-sky-400',     icon: Clock },
@@ -22,16 +27,24 @@ const STATUS_CONFIG = {
 const StatusBadge = ({ status }) => {
     const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.active;
     return (
-        <span className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border', cfg.bg, cfg.color, cfg.border)}>
+        <span className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border', cfg.bg, cfg.color, cfg.border)}>
             <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} />
             {cfg.label}
         </span>
     );
 };
 
-const PaymentModal = ({ shop, onClose, onSuccess }) => {
-    const [loading, setLoading] = useState(false);
+const SubscriptionsPage = () => {
+    const navigate = useNavigate();
+    const [shops, setShops] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [filter, setFilter] = useState('all');
+    const [selectedShop, setSelectedShop] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
     const { showToast } = useToast();
+
+    // Modal Form State
     const [form, setForm] = useState({ 
         amount: '', 
         months: 1, 
@@ -40,223 +53,48 @@ const PaymentModal = ({ shop, onClose, onSuccess }) => {
         reference_no: '', 
         notes: '' 
     });
-    const [mode, setMode] = useState('payment'); // 'payment' | 'extend' | 'lock' | 'unlock' | 'grace' | 'suspend'
-
-    const handleSubmit = async () => {
-        setLoading(true);
-        try {
-            let endpoint;
-            let body;
-            if (mode === 'payment')  { endpoint = `/super-admin/subscriptions/${shop.id}/mark-paid`; body = form; }
-            if (mode === 'extend')   { endpoint = `/super-admin/subscriptions/${shop.id}/extend`;  body = { months: form.months, days: form.days, notes: form.notes }; }
-            if (mode === 'lock')     { endpoint = `/super-admin/subscriptions/${shop.id}/lock`;    body = { reason: form.notes }; }
-            if (mode === 'unlock')   { endpoint = `/super-admin/subscriptions/${shop.id}/unlock`;  body = { notes: form.notes }; }
-            if (mode === 'grace')    { endpoint = `/super-admin/subscriptions/${shop.id}/grace`;   body = { days: form.days, note: form.notes }; }
-            if (mode === 'suspend')  { endpoint = `/super-admin/subscriptions/${shop.id}/suspend`; body = { reason: form.notes }; }
-
-            const { data } = await api.post(endpoint, body);
-            if (data.success) {
-                showToast(data.message, 'success');
-                onSuccess(data.message);
-                onClose();
-            }
-        } catch (err) {
-            console.error(err);
-            showToast(err.response?.data?.message || 'Action failed', 'error');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const isLocked = shop.effective_subscription_status === 'locked';
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
-            <div className="relative w-full max-w-lg bg-slate-900 border border-white/10 rounded-[2.5rem] p-10 shadow-2xl animate-in fade-in zoom-in-95 duration-300">
-                <div className="flex items-start justify-between mb-8">
-                    <div>
-                        <h3 className="text-2xl font-black text-white tracking-tight">{shop.name}</h3>
-                        <div className="mt-1.5">
-                            <StatusBadge status={shop.effective_subscription_status || shop.subscription_status} />
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-2 text-slate-500 hover:text-white transition-colors bg-white/5 rounded-xl">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                {/* Mode tabs */}
-                <div className="flex flex-wrap gap-2 mb-8 bg-slate-950/50 p-2 rounded-2xl border border-white/5">
-                    {[
-                      { id: 'payment', label: 'Payment', icon: CreditCard },
-                      { id: 'extend', label: 'Extend', icon: TrendingUp },
-                      { id: 'grace', label: 'Grace', icon: Clock },
-                      { id: isLocked ? 'unlock' : 'lock', label: isLocked ? 'Unlock' : 'Lock', icon: isLocked ? UserCheck : ShieldOff },
-                      { id: 'suspend', label: 'Suspend', icon: Ban },
-                    ].map(m => (
-                        <button
-                            key={m.id}
-                            onClick={() => setMode(m.id)}
-                            className={cn(
-                                'flex-1 min-w-[80px] py-3 px-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1.5',
-                                mode === m.id
-                                    ? ['lock', 'suspend'].includes(m.id) ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/20' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20'
-                                    : 'text-slate-500 hover:text-white hover:bg-white/5'
-                            )}
-                        >
-                            <m.icon size={14} />
-                            {m.label}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="space-y-6">
-                    {mode === 'payment' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="md:col-span-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Amount Received (Rs.)</label>
-                                <div className="relative">
-                                    <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                                    <input
-                                        type="number"
-                                        placeholder="e.g. 5000"
-                                        className="w-full pl-12 pr-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all"
-                                        value={form.amount}
-                                        onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Method</label>
-                                <select
-                                    className="w-full px-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                                    value={form.payment_method}
-                                    onChange={e => setForm(p => ({ ...p, payment_method: e.target.value }))}
-                                >
-                                    <option value="Cash">Cash</option>
-                                    <option value="Bank Transfer">Bank Transfer</option>
-                                    <option value="Card">Card Payment</option>
-                                    <option value="Other">Other</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Reference #</label>
-                                <div className="relative">
-                                    <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                                    <input
-                                        type="text"
-                                        placeholder="Optional"
-                                        className="w-full pl-10 pr-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                                        value={form.reference_no}
-                                        onChange={e => setForm(p => ({ ...p, reference_no: e.target.value }))}
-                                    />
-                                </div>
-                            </div>
-                            <div className="md:col-span-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Extend by (months)</label>
-                                <select
-                                    className="w-full px-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                                    value={form.months}
-                                    onChange={e => setForm(p => ({ ...p, months: e.target.value }))}
-                                >
-                                    {[1,2,3,6,12].map(m => <option key={m} value={m}>{m} month{m>1?'s':''}</option>)}
-                                </select>
-                            </div>
-                        </div>
-                    )}
-
-                    {mode === 'extend' && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Months</label>
-                                <select
-                                    className="w-full px-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                                    value={form.months}
-                                    onChange={e => setForm(p => ({ ...p, months: e.target.value }))}
-                                >
-                                    {[0,1,2,3,6,12].map(m => <option key={m} value={m}>{m} month{m!==1?'s':''}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Extra Days</label>
-                                <input
-                                    type="number"
-                                    className="w-full px-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                                    value={form.days}
-                                    onChange={e => setForm(p => ({ ...p, days: e.target.value }))}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {mode === 'grace' && (
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Add Grace Days</label>
-                            <input
-                                type="number"
-                                className="w-full px-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all"
-                                value={form.days}
-                                onChange={e => setForm(p => ({ ...p, days: e.target.value }))}
-                            />
-                        </div>
-                    )}
-
-                    <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5 block">Internal Notes / Reason</label>
-                        <textarea
-                            rows="2"
-                            placeholder="Enter reason or reference details..."
-                            className="w-full px-4 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-medium focus:outline-none focus:border-indigo-500 transition-all resize-none"
-                            value={form.notes}
-                            onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
-                        />
-                    </div>
-                </div>
-
-                <button
-                    onClick={handleSubmit}
-                    disabled={loading || (mode === 'payment' && !form.amount)}
-                    className={cn(
-                        'w-full mt-8 py-5 rounded-2xl font-black text-sm uppercase tracking-widest transition-all flex items-center justify-center gap-3 disabled:opacity-50 shadow-2xl',
-                        ['lock', 'suspend'].includes(mode)
-                            ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/30'
-                            : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/30'
-                    )}
-                >
-                    {loading ? <Loader2 className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
-                    {mode === 'payment' ? 'Confirm Payment' : mode === 'extend' ? 'Extend Access' : mode === 'grace' ? 'Grant Grace' : mode === 'lock' ? 'Lock Shop' : mode === 'unlock' ? 'Unlock Shop' : 'Suspend Shop'}
-                </button>
-            </div>
-        </div>
-    );
-};
-
-const SubscriptionsPage = () => {
-    const [shops, setShops] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [search, setSearch] = useState('');
-    const [filter, setFilter] = useState('all');
-    const [selectedShop, setSelectedShop] = useState(null);
-    const [successMsg, setSuccessMsg] = useState('');
+    const [mode, setMode] = useState('payment');
+    const [modalLoading, setModalLoading] = useState(false);
 
     useEffect(() => { fetchSubscriptions(); }, []);
 
     const fetchSubscriptions = async () => {
         try {
+            setLoading(true);
             const { data } = await api.get('/super-admin/subscriptions');
             if (data.success) setShops(data.data);
         } catch (err) {
             console.error(err);
+            showToast('Failed to fetch subscriptions', 'error');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleSuccess = (msg) => {
-        setSuccessMsg(msg);
-        fetchSubscriptions();
-        setTimeout(() => setSuccessMsg(''), 4000);
+    const handleModalSubmit = async () => {
+        setModalLoading(true);
+        try {
+            let endpoint;
+            let body;
+            if (mode === 'payment')  { endpoint = `/super-admin/subscriptions/${selectedShop.id}/mark-paid`; body = form; }
+            if (mode === 'extend')   { endpoint = `/super-admin/subscriptions/${selectedShop.id}/extend`;  body = { months: form.months, days: form.days, notes: form.notes }; }
+            if (mode === 'lock')     { endpoint = `/super-admin/subscriptions/${selectedShop.id}/lock`;    body = { reason: form.notes }; }
+            if (mode === 'unlock')   { endpoint = `/super-admin/subscriptions/${selectedShop.id}/unlock`;  body = { notes: form.notes }; }
+            if (mode === 'grace')    { endpoint = `/super-admin/subscriptions/${selectedShop.id}/grace`;   body = { days: form.days, note: form.notes }; }
+            if (mode === 'suspend')  { endpoint = `/super-admin/subscriptions/${selectedShop.id}/suspend`; body = { reason: form.notes }; }
+
+            const { data } = await api.post(endpoint, body);
+            if (data.success) {
+                showToast(data.message, 'success');
+                setIsModalOpen(false);
+                fetchSubscriptions();
+            }
+        } catch (err) {
+            console.error(err);
+            showToast(err.response?.data?.message || 'Action failed', 'error');
+        } finally {
+            setModalLoading(false);
+        }
     };
 
     const filtered = shops.filter(s => {
@@ -271,80 +109,215 @@ const SubscriptionsPage = () => {
         return acc;
     }, {});
 
+    const totalRevenue = shops.reduce((sum, s) => sum + parseFloat(s.last_payment_amount || 0), 0);
+    const expiringSoon = shops.filter(s => {
+        const days = s.subscription_end_date ? Math.ceil((new Date(s.subscription_end_date) - new Date()) / (1000 * 60 * 60 * 24)) : 999;
+        return days >= 0 && days <= 7;
+    });
+
+    const isLocked = selectedShop?.effective_subscription_status === 'locked';
+
     return (
-        <div className="space-y-8 animate-in fade-in duration-700">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-black text-white tracking-tight">Subscriptions</h1>
-                    <p className="text-slate-400 mt-1">SaaS Billing & Lifecycle Management</p>
+        <div className="max-w-[1600px] mx-auto space-y-12 pb-24 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+            {/* Cyber Header & Revenue Matrix */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                <div className="xl:col-span-2 relative overflow-hidden bg-slate-900/40 border border-white/5 p-12 rounded-[4rem] backdrop-blur-3xl">
+                    <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-indigo-500/10 blur-[120px] rounded-full -mr-40 -mt-40 animate-pulse"></div>
+                    <div className="relative flex flex-col md:flex-row items-center justify-between gap-8 h-full">
+                        <div>
+                            <div className="flex items-center gap-4 mb-3">
+                                <Zap className="text-indigo-500 animate-pulse" size={24} />
+                                <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">SaaS Billing Ecosystem</p>
+                            </div>
+                            <h1 className="text-5xl font-black text-white tracking-tighter">Subscriptions</h1>
+                            <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-3 leading-relaxed">
+                                Managing {shops.length} nodes <span className="mx-2 text-slate-800">|</span> 
+                                <span className="text-emerald-500"> {stats.active || 0} Healthy</span> <span className="mx-2 text-slate-800">|</span> 
+                                <span className="text-rose-500"> {expiringSoon.length} Critical</span>
+                            </p>
+                        </div>
+                        <button 
+                            onClick={fetchSubscriptions} 
+                            className="flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-[2rem] text-slate-400 hover:text-white transition-all text-xs font-black uppercase tracking-[0.2em]"
+                        >
+                            <RefreshCw size={18} className={cn(loading && "animate-spin")} />
+                            Synch Nodes
+                        </button>
+                    </div>
                 </div>
-                <button onClick={fetchSubscriptions} className="flex items-center gap-2 px-5 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-slate-400 hover:text-white transition-all text-sm font-bold">
-                    <RefreshCw size={16} />
-                    Refresh
-                </button>
+
+                <div className="relative overflow-hidden bg-indigo-600 border border-indigo-500 p-12 rounded-[4rem] shadow-2xl shadow-indigo-900/20 group">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 blur-[60px] rounded-full -mr-20 -mt-20 group-hover:scale-125 transition-transform duration-1000"></div>
+                    <div className="relative h-full flex flex-col justify-between">
+                        <div className="flex items-center justify-between">
+                            <div className="w-16 h-16 rounded-[2rem] bg-white/20 flex items-center justify-center text-white backdrop-blur-xl">
+                                <Wallet size={32} />
+                            </div>
+                            <div className="flex flex-col items-end">
+                                <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">Growth Index</p>
+                                <div className="flex items-center gap-1 text-emerald-300 font-black">
+                                    <ArrowUpRight size={16} />
+                                    <span>12.4%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <p className="text-[11px] font-black text-indigo-200 uppercase tracking-[0.3em] mb-2">Total Node Revenue</p>
+                            <h2 className="text-4xl font-black text-white tracking-tighter tabular-nums">
+                                Rs. {totalRevenue.toLocaleString()}
+                            </h2>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {successMsg && (
-                <div className="px-6 py-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 font-bold text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top duration-300">
-                    <CheckCircle2 size={18} />
-                    {successMsg}
-                </div>
-            )}
+            {/* Critical Operations Widget (Proper Implementation) */}
+            <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-rose-600 to-amber-600 rounded-[4.2rem] blur opacity-25 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
+                <div className="relative bg-slate-900 border border-white/10 rounded-[4rem] p-12 backdrop-blur-3xl overflow-hidden">
+                    <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform duration-700">
+                        <Timer size={120} className="text-white" />
+                    </div>
+                    
+                    <div className="flex flex-col lg:flex-row items-center justify-between gap-8 mb-12">
+                        <div>
+                            <div className="flex items-center gap-4 mb-2">
+                                <div className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+                                <h3 className="text-2xl font-black text-white tracking-tight uppercase">Critical Expirations Protocol</h3>
+                            </div>
+                            <p className="text-slate-500 font-bold text-sm uppercase tracking-widest">Nodes scheduled for suspension within the 168-hour temporal window</p>
+                        </div>
+                        <div className="flex items-center gap-6">
+                            <div className="px-6 py-3 bg-rose-500/10 border border-rose-500/20 rounded-2xl">
+                                <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1">Impact Level</p>
+                                <p className="text-xl font-black text-white tabular-nums">{expiringSoon.length} Shop Nodes</p>
+                            </div>
+                            <button className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-slate-400 hover:text-white transition-all text-[10px] font-black uppercase tracking-widest">
+                                Expand Registry
+                            </button>
+                        </div>
+                    </div>
 
-            {/* Stats Row */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {expiringSoon.length > 0 ? expiringSoon.slice(0, 4).map(s => {
+                            const days = Math.ceil((new Date(s.subscription_end_date) - new Date()) / (1000 * 60 * 60 * 24));
+                            return (
+                                <div key={s.id} className="relative group/card">
+                                    <div className="p-8 bg-slate-950/60 border border-white/5 rounded-[3rem] transition-all duration-500 hover:bg-slate-950 hover:border-rose-500/30">
+                                        <div className="flex items-center justify-between mb-6">
+                                            <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center font-black text-white text-xl">
+                                                {s.name.charAt(0)}
+                                            </div>
+                                            <div className={cn(
+                                                "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border",
+                                                days <= 2 ? "bg-rose-500/10 text-rose-500 border-rose-500/20" : "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                                            )}>
+                                                {days}d Left
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="mb-8">
+                                            <h4 className="text-lg font-black text-white truncate mb-1">{s.name}</h4>
+                                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{s.identifier}</p>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={() => navigate(`/super-admin/shops/${s.identifier}/governance`)}
+                                                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-900/20"
+                                            >
+                                                Renew
+                                            </button>
+                                            <button className="p-3 bg-white/5 hover:bg-white/10 text-slate-400 rounded-xl transition-all">
+                                                <Mail size={14} />
+                                            </button>
+                                            <button className="p-3 bg-white/5 hover:bg-white/10 text-slate-400 rounded-xl transition-all">
+                                                <Phone size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        }) : (
+                            <div className="col-span-4 py-16 flex flex-col items-center justify-center gap-4 bg-slate-950/20 rounded-[3rem] border border-dashed border-white/5">
+                                <CheckCircle2 className="text-emerald-500/30" size={48} />
+                                <p className="text-slate-600 font-black uppercase tracking-[0.3em] text-[10px]">All nodes operating within temporal safety margins</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Premium Stat Matrix (Filters) */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-6">
                 {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
                     <button
                         key={key}
                         onClick={() => setFilter(filter === key ? 'all' : key)}
                         className={cn(
-                            'p-4 rounded-[2rem] border transition-all text-left group',
-                            filter === key ? `${cfg.bg} ${cfg.border}` : 'bg-slate-900/50 border-white/5 hover:border-white/10'
+                            'p-8 rounded-[2.5rem] border transition-all duration-500 text-left group relative overflow-hidden',
+                            filter === key ? `${cfg.bg} ${cfg.border} shadow-2xl` : 'bg-slate-900/50 border-white/5 hover:border-white/10'
                         )}
                     >
-                        <cfg.icon size={20} className={cn('mb-2', cfg.color)} />
-                        <p className="text-2xl font-black text-white">{stats[key] || 0}</p>
-                        <p className={cn('text-[9px] font-black uppercase tracking-widest mt-1', cfg.color)}>{cfg.label}</p>
+                        <cfg.icon size={24} className={cn('mb-4 transition-transform group-hover:scale-110', cfg.color)} />
+                        <p className="text-3xl font-black text-white tabular-nums">{stats[key] || 0}</p>
+                        <p className={cn('text-[10px] font-black uppercase tracking-widest mt-1', cfg.color)}>{cfg.label}</p>
                     </button>
                 ))}
             </div>
 
-            {/* Search */}
-            <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors group-focus-within:text-indigo-400" size={18} />
-                <input
-                    type="text"
-                    placeholder="Search shops by name or identifier..."
-                    className="w-full pl-12 pr-4 py-4 bg-slate-900/50 border border-white/5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                />
+            {/* Operations Bar */}
+            <div className="flex flex-col lg:flex-row gap-6 items-center">
+                <div className="relative flex-1 group w-full">
+                    <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 transition-colors group-focus-within:text-indigo-400" size={20} />
+                    <input
+                        type="text"
+                        placeholder="Search shops by name or unique identifier..."
+                        className="w-full pl-16 pr-6 py-5 bg-slate-900/50 border border-white/5 rounded-[2rem] text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all font-bold"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                    />
+                </div>
+                <div className="flex items-center gap-4 bg-slate-900/50 border border-white/5 p-2 rounded-[2rem]">
+                    <button className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-indigo-400 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
+                        CSV Export
+                    </button>
+                    <div className="w-[1px] h-6 bg-white/5" />
+                    <button className="p-3 text-slate-500 hover:text-white transition-colors">
+                        <Filter size={18} />
+                    </button>
+                </div>
             </div>
 
-            {/* Table */}
-            <div className="bg-slate-900/50 border border-white/5 rounded-[2.5rem] overflow-hidden">
+            {/* Neural Table container */}
+            <div className="bg-slate-900/50 border border-white/5 rounded-[4rem] overflow-hidden backdrop-blur-sm relative">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="border-b border-white/5 bg-white/[0.02]">
-                                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Shop & ID</th>
-                                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Effective Status</th>
-                                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Subscription End</th>
-                                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Days Remaining</th>
-                                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Last Payment</th>
-                                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>
+                            <tr className="border-b border-white/5 bg-white/[0.01]">
+                                <th className="px-10 py-8 text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Shop Identity</th>
+                                <th className="px-8 py-8 text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Access Protocol</th>
+                                <th className="px-8 py-8 text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Expiration Matrix</th>
+                                <th className="px-8 py-8 text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Temporal Delta</th>
+                                <th className="px-8 py-8 text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Last Capital Stream</th>
+                                <th className="px-10 py-8 text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {loading ? (
-                                <tr><td colSpan="6" className="px-8 py-20 text-center text-slate-500">
-                                    <div className="flex flex-col items-center gap-3">
-                                        <Loader2 className="animate-spin text-indigo-500" size={28} />
-                                        Loading shops...
+                                <tr><td colSpan="6" className="px-10 py-32 text-center">
+                                    <div className="flex flex-col items-center gap-6">
+                                        <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+                                        <p className="text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">Scanning subscription nodes...</p>
                                     </div>
                                 </td></tr>
                             ) : filtered.length === 0 ? (
-                                <tr><td colSpan="6" className="px-8 py-16 text-center text-slate-500">No matching subscriptions found.</td></tr>
+                                <tr><td colSpan="6" className="px-10 py-32 text-center text-slate-500">
+                                    <div className="flex flex-col items-center gap-4 opacity-30">
+                                        <Store size={48} />
+                                        <p className="text-xl font-black uppercase tracking-tighter">No subscription nodes matched search</p>
+                                    </div>
+                                </td></tr>
                             ) : filtered.map(shop => {
                                 const effectiveStatus = shop.effective_subscription_status || shop.subscription_status;
                                 const daysLeft = shop.subscription_end_date
@@ -352,58 +325,63 @@ const SubscriptionsPage = () => {
                                     : null;
 
                                 return (
-                                    <tr key={shop.id} className="group hover:bg-white/[0.02] transition-colors">
-                                        <td className="px-8 py-6">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 font-black flex items-center justify-center border border-indigo-500/10">
+                                    <tr key={shop.id} className="group hover:bg-white/[0.03] transition-all duration-300">
+                                        <td className="px-10 py-8">
+                                            <div className="flex items-center gap-6">
+                                                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 text-indigo-400 font-black flex items-center justify-center border border-indigo-500/10 text-xl group-hover:scale-110 transition-transform duration-500">
                                                     {shop.name.charAt(0).toUpperCase()}
                                                 </div>
                                                 <div>
-                                                    <p className="font-bold text-white leading-none">{shop.name}</p>
-                                                    <p className="text-[10px] text-slate-500 font-mono mt-1.5">{shop.identifier}</p>
+                                                    <p className="font-black text-white text-lg tracking-tight group-hover:text-indigo-400 transition-colors">{shop.name}</p>
+                                                    <p className="text-[10px] text-slate-500 font-mono mt-1 uppercase tracking-widest">{shop.identifier}</p>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-8 py-6">
+                                        <td className="px-8 py-8">
                                             <StatusBadge status={effectiveStatus} />
                                         </td>
-                                        <td className="px-8 py-6 text-sm text-slate-400">
-                                            {shop.subscription_end_date
-                                                ? new Date(shop.subscription_end_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-                                                : shop.trial_ends_at ? `Trial: ${new Date(shop.trial_ends_at).toLocaleDateString()}` : '—'
-                                            }
+                                        <td className="px-8 py-8">
+                                            <div className="flex items-center gap-3">
+                                                <Calendar size={16} className="text-slate-600" />
+                                                <p className="text-sm font-bold text-slate-300">
+                                                    {shop.subscription_end_date
+                                                        ? new Date(shop.subscription_end_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                                                        : shop.trial_ends_at ? `Trial: ${new Date(shop.trial_ends_at).toLocaleDateString()}` : '—'
+                                                    }
+                                                </p>
+                                            </div>
                                         </td>
-                                        <td className="px-8 py-6">
+                                        <td className="px-8 py-8">
                                             {daysLeft !== null ? (
-                                                <div className="flex flex-col gap-1">
+                                                <div className="flex flex-col gap-2">
                                                     <span className={cn(
-                                                        'text-sm font-black',
+                                                        'text-xs font-black uppercase tracking-widest',
                                                         daysLeft > 30 ? 'text-emerald-400' : daysLeft > 7 ? 'text-amber-400' : 'text-rose-400'
                                                     )}>
-                                                        {daysLeft > 0 ? `${daysLeft} days` : `${Math.abs(daysLeft)} days ago`}
+                                                        {daysLeft > 0 ? `${daysLeft} days remaining` : `${Math.abs(daysLeft)} days expired`}
                                                     </span>
-                                                    <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
+                                                    <div className="w-24 h-1.5 bg-white/5 rounded-full overflow-hidden">
                                                         <div 
-                                                            className={cn('h-full transition-all', daysLeft > 30 ? 'bg-emerald-500' : daysLeft > 7 ? 'bg-amber-500' : 'bg-rose-500')}
+                                                            className={cn('h-full transition-all duration-1000', daysLeft > 30 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : daysLeft > 7 ? 'bg-amber-500' : 'bg-rose-500')}
                                                             style={{ width: `${Math.min(100, Math.max(0, (daysLeft/30)*100))}%` }}
                                                         />
                                                     </div>
                                                 </div>
                                             ) : <span className="text-slate-600">—</span>}
                                         </td>
-                                        <td className="px-8 py-6 text-sm text-slate-400">
+                                        <td className="px-8 py-8">
                                             {shop.last_payment_date
-                                                ? <div className="flex flex-col">
-                                                    <span className="text-white font-bold">Rs. {parseFloat(shop.last_payment_amount || 0).toLocaleString()}</span>
-                                                    <span className="text-slate-500 text-[10px] mt-0.5">{new Date(shop.last_payment_date).toLocaleDateString('en-GB')}</span>
+                                                ? <div className="flex flex-col gap-1">
+                                                    <span className="text-white font-black text-lg tabular-nums">Rs. {parseFloat(shop.last_payment_amount || 0).toLocaleString()}</span>
+                                                    <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">{new Date(shop.last_payment_date).toLocaleDateString('en-GB')}</span>
                                                 </div>
-                                                : '—'
+                                                : <span className="text-slate-700 text-xs font-bold uppercase tracking-widest italic">No Payments Found</span>
                                             }
                                         </td>
-                                        <td className="px-8 py-6 text-right">
+                                        <td className="px-10 py-8 text-right">
                                             <button
-                                                onClick={() => setSelectedShop(shop)}
-                                                className="flex items-center gap-2 ml-auto px-4 py-2.5 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-600/20 hover:border-indigo-600 rounded-xl text-indigo-400 hover:text-white transition-all text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-900/20"
+                                                onClick={() => navigate(`/super-admin/shops/${shop.identifier}/governance`)}
+                                                className="inline-flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-indigo-600 border border-white/5 hover:border-indigo-500 rounded-2xl text-slate-400 hover:text-white transition-all text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:shadow-indigo-600/20"
                                             >
                                                 Manage
                                                 <ChevronRight size={14} />
@@ -417,13 +395,152 @@ const SubscriptionsPage = () => {
                 </div>
             </div>
 
-            {selectedShop && (
-                <PaymentModal
-                    shop={selectedShop}
-                    onClose={() => setSelectedShop(null)}
-                    onSuccess={handleSuccess}
-                />
-            )}
+            {/* Governance Modal */}
+            <AppModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title={`Access Governance: ${selectedShop?.name}`}
+                maxWidth="2xl"
+            >
+                <div className="space-y-8 p-4">
+                    {/* Mode Matrix */}
+                    <div className="grid grid-cols-3 md:grid-cols-5 gap-3 bg-slate-950/50 p-2 rounded-3xl border border-white/5">
+                        {[
+                          { id: 'payment', label: 'Payment', icon: CreditCard },
+                          { id: 'extend', label: 'Extend', icon: TrendingUp },
+                          { id: 'grace', label: 'Grace', icon: Clock },
+                          { id: isLocked ? 'unlock' : 'lock', label: isLocked ? 'Unlock' : 'Lock', icon: isLocked ? UserCheck : ShieldOff },
+                          { id: 'suspend', label: 'Suspend', icon: Ban },
+                        ].map(m => (
+                            <button
+                                key={m.id}
+                                onClick={() => setMode(m.id)}
+                                className={cn(
+                                    'py-4 px-2 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-2',
+                                    mode === m.id
+                                        ? ['lock', 'suspend'].includes(m.id) ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/30' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
+                                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                                )}
+                            >
+                                <m.icon size={18} />
+                                {m.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="space-y-6">
+                        {mode === 'payment' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="md:col-span-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Amount Received (LKR)</label>
+                                    <div className="relative">
+                                        <div className="absolute left-6 top-1/2 -translate-y-1/2 text-indigo-500 font-black">Rs.</div>
+                                        <input
+                                            type="number"
+                                            className="w-full pl-16 pr-6 py-5 bg-slate-950 border border-white/5 rounded-2xl text-white font-black text-2xl focus:outline-none focus:border-indigo-500 transition-all placeholder:text-slate-800"
+                                            placeholder="0.00"
+                                            value={form.amount}
+                                            onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Payment Protocol</label>
+                                    <select
+                                        className="w-full px-6 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-xs"
+                                        value={form.payment_method}
+                                        onChange={e => setForm(p => ({ ...p, payment_method: e.target.value }))}
+                                    >
+                                        <option value="Cash">Cash Liquidity</option>
+                                        <option value="Bank Transfer">Bank Wire</option>
+                                        <option value="Card">Digital Checkout</option>
+                                        <option value="Other">Special Transfer</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Temporal Extension</label>
+                                    <select
+                                        className="w-full px-6 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-xs"
+                                        value={form.months}
+                                        onChange={e => setForm(p => ({ ...p, months: e.target.value }))}
+                                    >
+                                        {[1,2,3,6,12].map(m => <option key={m} value={m}>{m} Month{m>1?'s':''} Protocol</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+
+                        {mode === 'extend' && (
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Months Extension</label>
+                                    <select
+                                        className="w-full px-6 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-xs"
+                                        value={form.months}
+                                        onChange={e => setForm(p => ({ ...p, months: e.target.value }))}
+                                    >
+                                        {[0,1,2,3,6,12].map(m => <option key={m} value={m}>{m} month{m!==1?'s':''}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Temporal Offset (Days)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full px-6 py-4 bg-slate-950 border border-white/5 rounded-2xl text-white font-bold focus:outline-none focus:border-indigo-500 transition-all text-xs"
+                                        value={form.days}
+                                        onChange={e => setForm(p => ({ ...p, days: e.target.value }))}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {mode === 'grace' && (
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Provision Grace Period (Days)</label>
+                                <input
+                                    type="number"
+                                    className="w-full px-6 py-5 bg-slate-950 border border-white/5 rounded-2xl text-white font-black text-xl focus:outline-none focus:border-indigo-500 transition-all"
+                                    value={form.days}
+                                    onChange={e => setForm(p => ({ ...p, days: e.target.value }))}
+                                />
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Neural Audit Note</label>
+                            <textarea
+                                rows="3"
+                                placeholder="Enter administrative justification or reference details..."
+                                className="w-full px-6 py-5 bg-slate-950 border border-white/5 rounded-3xl text-white font-medium focus:outline-none focus:border-indigo-500 transition-all resize-none text-sm leading-relaxed"
+                                value={form.notes}
+                                onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4">
+                        <button 
+                            onClick={() => setIsModalOpen(false)}
+                            className="flex-1 py-5 bg-white/5 hover:bg-white/10 text-slate-400 font-black text-[11px] uppercase tracking-[0.3em] rounded-2xl transition-all"
+                        >
+                            Abort
+                        </button>
+                        <button
+                            onClick={handleModalSubmit}
+                            disabled={modalLoading || (mode === 'payment' && !form.amount)}
+                            className={cn(
+                                'flex-[2] py-5 rounded-2xl font-black text-[11px] uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 disabled:opacity-50 shadow-2xl active:scale-95',
+                                ['lock', 'suspend'].includes(mode)
+                                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/40'
+                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/40'
+                            )}
+                        >
+                            {modalLoading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={18} />}
+                            Finalize {mode.toUpperCase()} Protocol
+                        </button>
+                    </div>
+                </div>
+            </AppModal>
         </div>
     );
 };

@@ -2,13 +2,15 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { db } = require('../config/db');
+const subscriptionService = require('../services/subscriptionService');
+const platformSettingsService = require('../services/platformSettingsService');
 
-const generateToken = (id, role, shopId, shopSlug, tokenVersion = 0) => {
+const generateToken = (id, role, shopId, shopSlug, tokenVersion = 0, expiryHrs = 24) => {
     if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
         console.warn('WARNING: JWT_SECRET is not set or is less than 32 characters. This is a security risk!');
     }
     return jwt.sign({ id, role, shopId, shopSlug, token_version: tokenVersion }, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES_IN || '1d'
+        expiresIn: `${expiryHrs}h`
     });
 };
 
@@ -31,7 +33,11 @@ exports.login = async (req, res) => {
                    s.subscription_end_date,
                    s.grace_until,
                    s.trial_ends_at,
-                   s.subscription_plan
+                   s.subscription_plan,
+                   s.has_delivery_orders,
+                   s.has_marketing_center,
+                   s.has_quick_retail,
+                   s.module_permissions
             FROM users u
             LEFT JOIN shops s ON u.shop_id = s.id
             WHERE u.email = ?
@@ -62,29 +68,65 @@ exports.login = async (req, res) => {
             return res.status(403).json({ success: false, message: 'Account is deactivated.' });
         }
 
-        // Check if shop is active (for non-super_admin)
-        if (user.role !== 'super_admin' && user.shop_status !== 'active') {
+        // Check Maintenance Mode
+        if (platformSettingsService.getBool('maintenance_mode') && user.role !== 'super_admin') {
+            return res.status(503).json({ 
+                success: false, 
+                maintenance: true,
+                message: 'System is under maintenance. Only platform administrators can access at this time.' 
+            });
+        }
+
+        // Check if account is locked
+        if (user.locked_until && new Date(user.locked_until) > new Date()) {
+            const minutesLeft = Math.ceil((new Date(user.locked_until) - new Date()) / 60000);
             return res.status(403).json({ 
                 success: false, 
-                message: `Restaurant account is ${user.shop_status || 'not found'}. Access denied.` 
+                message: `Account is temporarily locked due to too many failed attempts. Try again in ${minutesLeft} minutes.` 
             });
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
+        
         if (!isMatch) {
+            const maxAttempts = platformSettingsService.getInt('max_login_attempts', 5);
+            const newAttempts = (user.failed_login_attempts || 0) + 1;
+            
+            let updateQuery = 'UPDATE users SET failed_login_attempts = ? WHERE id = ?';
+            let updateParams = [newAttempts, user.id];
+            let errorMessage = 'Invalid email or password';
+
+            if (newAttempts >= maxAttempts) {
+                const lockMinutes = 15;
+                const lockedUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
+                updateQuery = 'UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?';
+                updateParams = [newAttempts, lockedUntil, user.id];
+                errorMessage = `Too many failed attempts. Account locked for ${lockMinutes} minutes.`;
+            }
+
+            await db.query(updateQuery, updateParams);
+
             await logAudit(null, {
                 userId: user.id,
                 action: 'login_failed',
                 entityType: 'user',
-                newValue: { email },
+                newValue: { email, attempts: newAttempts },
                 ipAddress,
                 userAgent
             });
-            return res.status(401).json({ success: false, message: 'Invalid email or password' });
+            return res.status(401).json({ success: false, message: errorMessage });
         }
 
-        // Check if 2FA is required
-        if (user.is_2fa_enabled) {
+        // Reset failed attempts on success
+        if (user.failed_login_attempts > 0) {
+            await db.query('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
+        }
+
+        // Check if 2FA is required (Individual or Platform-wide for admins)
+        const force2faAdmins = platformSettingsService.getBool('force_2fa_admins');
+        const is2faRequired = user.is_2fa_enabled || (force2faAdmins && user.role === 'super_admin');
+
+        if (is2faRequired) {
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
@@ -129,11 +171,12 @@ exports.login = async (req, res) => {
                 shopId: user.shop_id,
                 shopName: user.shop_name,
                 shopIdentifier: user.shop_identifier,
-                subscriptionStatus: user.subscription_status || 'active',
+                subscriptionStatus: subscriptionService.resolveEffectiveSubscriptionStatus(user),
                 subscriptionEndDate: user.subscription_end_date || null,
                 gracePeriodUntil: user.grace_until || null,
                 trialEndsAt: user.trial_ends_at || null,
                 subscriptionPlan: user.subscription_plan || 'standard',
+                hasDeliveryOrders: !!user.has_delivery_orders,
                 token: generateToken(user.id, user.role, user.shop_id, user.shop_identifier, user.token_version)
             }
         });
@@ -155,8 +198,17 @@ exports.verify2FA = async (req, res) => {
     try {
         const [users] = await db.query(`
             SELECT u.*, 
-                   s.status as shop_status, s.name as shop_name, s.identifier as shop_identifier,
-                   s.subscription_status, s.subscription_end_date, s.grace_until, s.trial_ends_at, s.subscription_plan
+                   s.status as shop_status, 
+                   s.name as shop_name, 
+                   s.identifier as shop_identifier,
+                   s.subscription_status,
+                   s.subscription_end_date,
+                   s.grace_until,
+                   s.trial_ends_at,
+                   s.subscription_plan,
+                   s.has_delivery_orders,
+                   s.has_marketing_center,
+                   s.has_quick_retail
             FROM users u
             LEFT JOIN shops s ON u.shop_id = s.id
             WHERE u.id = ?
@@ -202,6 +254,7 @@ exports.verify2FA = async (req, res) => {
                 gracePeriodUntil: user.grace_until || null,
                 trialEndsAt: user.trial_ends_at || null,
                 subscriptionPlan: user.subscription_plan || 'standard',
+                hasDeliveryOrders: !!user.has_delivery_orders,
                 token: generateToken(user.id, user.role, user.shop_id, user.shop_identifier, user.token_version)
             }
         });
@@ -219,7 +272,8 @@ exports.getMe = async (req, res) => {
         const [users] = await db.query(`
             SELECT u.id, u.name, u.email, u.role, u.status, u.shop_id, 
                    s.name as shop_name, s.identifier as shop_identifier,
-                   s.subscription_status, s.subscription_end_date, s.grace_until, s.trial_ends_at, s.subscription_plan
+                   s.subscription_status, s.subscription_end_date, s.grace_until, s.trial_ends_at, s.subscription_plan,
+                   s.has_delivery_orders, s.has_marketing_center, s.has_quick_retail, s.module_permissions
             FROM users u
             LEFT JOIN shops s ON u.shop_id = s.id
             WHERE u.id = ?
@@ -240,7 +294,11 @@ exports.getMe = async (req, res) => {
                 subscriptionEndDate: user.subscription_end_date,
                 gracePeriodUntil: user.grace_until,
                 trialEndsAt: user.trial_ends_at,
-                subscriptionPlan: user.subscription_plan
+                subscriptionPlan: user.subscription_plan,
+                hasDeliveryOrders: !!user.has_delivery_orders,
+                hasMarketingCenter: !!user.has_marketing_center,
+                hasQuickRetail: !!user.has_quick_retail,
+                modulePermissions: typeof user.module_permissions === 'string' ? JSON.parse(user.module_permissions) : user.module_permissions
             };
             res.json({ success: true, data: formattedUser });
         } else {

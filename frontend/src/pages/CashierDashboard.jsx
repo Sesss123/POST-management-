@@ -14,15 +14,17 @@ import {
   Banknote,
   Grid3X3,
   Zap,
-  CreditCard
+  CreditCard,
+  Truck,
+  Users
 } from 'lucide-react';
-import { StatCard, AppButton, Skeleton as UiSkeleton } from '../components/ui';
+import { StatCard, AppButton, Skeleton } from '../components/ui';
 import { cn } from '../utils/cn';
 import QuickRetailModal from '../components/pos/QuickRetailModal';
 
 const CashierDashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user: currentUser } = useAuth();
   const [stats, setStats] = useState(null);
   const [shift, setShift] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ const CashierDashboard = () => {
     }
   };
 
-  const actionCards = [
+  const actionCards = React.useMemo(() => [
     { 
       label: 'Cash Sale', 
       desc: 'Create quick paid invoice', 
@@ -90,14 +92,30 @@ const CashierDashboard = () => {
       shadow: 'shadow-rose-200'
     },
     { 
+      label: 'Customer HQ', 
+      desc: 'Member ledgers & debt info', 
+      icon: Users, 
+      path: '/customers', 
+      color: 'bg-indigo-600',
+      shadow: 'shadow-indigo-200'
+    },
+    ...(currentUser?.hasDeliveryOrders ? [{ 
+      label: 'Delivery Hub', 
+      desc: 'Manage delivery & takeout', 
+      icon: Truck, 
+      path: '/delivery-orders', 
+      color: 'bg-orange-600',
+      shadow: 'shadow-orange-200'
+    }] : []),
+    { 
       label: 'Quick Retail (No-Bill)', 
       desc: 'Fast checkout, no bill', 
       icon: Zap, 
       action: () => navigate('/quick-retail'),
-      color: 'bg-indigo-600',
-      shadow: 'shadow-indigo-200'
+      color: 'bg-slate-900',
+      shadow: 'shadow-slate-200'
     }
-  ];
+  ], [currentUser?.hasDeliveryOrders]);
 
 
   useEffect(() => {
@@ -139,7 +157,7 @@ const CashierDashboard = () => {
     <div className="space-y-10 animate-in fade-in duration-500">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Welcome, {user?.name || 'Cashier'}</h1>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Welcome, {currentUser?.name || 'Cashier'}</h1>
           <p className="text-slate-500 font-medium">Have a great shift today.</p>
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -217,29 +235,34 @@ const CashierDashboard = () => {
                     value={`Rs. ${parseFloat(stats?.summary?.todayCash || 0).toLocaleString()}`} 
                     icon={Banknote} 
                     variant="success"
+                    onClick={() => navigate('/invoices')}
                 />
                 <StatCard 
                     title="Today QR" 
                     value={`Rs. ${parseFloat(stats?.summary?.todayQR || 0).toLocaleString()}`} 
                     icon={Zap} 
                     variant="primary"
+                    onClick={() => navigate('/invoices')}
                 />
                 <StatCard 
                     title="Today Card" 
                     value={`Rs. ${parseFloat(stats?.summary?.todayCard || 0).toLocaleString()}`} 
                     icon={CreditCard} 
                     variant="info"
+                    onClick={() => navigate('/invoices')}
                 />
                 <StatCard 
                     title="Today Credit" 
                     value={`Rs. ${parseFloat(stats?.summary?.todayCredit || 0).toLocaleString()}`} 
                     icon={BookOpen} 
                     variant="credit"
+                    onClick={() => navigate('/customers')}
                 />
                 <StatCard 
                     title="Invoices Today" 
                     value={stats?.summary?.invoiceCount || 0} 
                     icon={Receipt} 
+                    onClick={() => navigate('/invoices')}
                 />
             </>
         )}
@@ -265,10 +288,10 @@ const CashierDashboard = () => {
                       {loading ? (
                           [...Array(3)].map((_, i) => (
                               <tr key={i}>
-                                  <td className="px-8 py-5"><UiSkeleton className="h-4 w-24 mb-2" /><UiSkeleton className="h-3 w-16" /></td>
-                                  <td className="px-8 py-5"><UiSkeleton className="h-4 w-32" /></td>
-                                  <td className="px-8 py-5"><UiSkeleton className="h-6 w-20 rounded-full" /></td>
-                                  <td className="px-8 py-5 text-right"><UiSkeleton className="h-4 w-20 ml-auto" /></td>
+                                  <td className="px-8 py-5"><Skeleton className="h-4 w-24 mb-2" /><Skeleton className="h-3 w-16" /></td>
+                                  <td className="px-8 py-5"><Skeleton className="h-4 w-32" /></td>
+                                  <td className="px-8 py-5"><Skeleton className="h-6 w-20 rounded-full" /></td>
+                                  <td className="px-8 py-5 text-right"><Skeleton className="h-4 w-20 ml-auto" /></td>
                               </tr>
                           ))
                       ) : stats?.recentInvoices?.map(inv => (
@@ -289,7 +312,7 @@ const CashierDashboard = () => {
                                   </span>
                               </td>
                               <td className="px-8 py-5 text-right font-black text-slate-900">
-                                  Rs. {parseFloat(inv.grand_total).toLocaleString()}
+                                  Rs. {parseFloat(inv.grand_total || 0).toLocaleString()}
                               </td>
                           </tr>
                       ))}

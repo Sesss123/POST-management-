@@ -1,8 +1,67 @@
 import React, { useState, useEffect } from 'react';
 import { itemApi } from '../api/api';
-import { Package, Plus, Search, Tag, DollarSign, Filter, Edit, Trash2, Eye, EyeOff, AlertTriangle, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { 
+    Package, 
+    Plus, 
+    Search, 
+    Tag, 
+    DollarSign, 
+    Filter, 
+    Edit, 
+    Trash2, 
+    Eye, 
+    EyeOff, 
+    AlertTriangle, 
+    CheckCircle2, 
+    XCircle, 
+    Clock, 
+    Sparkles, 
+    RefreshCw,
+    TrendingUp,
+    Layers,
+    ArrowRight,
+    ChevronRight,
+    Activity
+} from 'lucide-react';
 import { AppButton, AppCard, AppTable, StatusBadge, AppModal, FormInput, FormSelect, useToast, ResponsiveDataList } from '../components/ui';
 import { cn } from '../utils/cn';
+
+const GlassCard = ({ title, value, icon: Icon, variant = 'primary', className }) => {
+    const variants = {
+        primary: "bg-indigo-50 border-indigo-100",
+        success: "bg-emerald-50 border-emerald-100",
+        danger: "bg-rose-50 border-rose-100",
+        warning: "bg-amber-50 border-amber-100",
+    };
+
+    const iconBg = {
+        primary: "bg-white text-indigo-600",
+        success: "bg-white text-emerald-600",
+        danger: "bg-white text-rose-600",
+        warning: "bg-white text-amber-600",
+    };
+
+    return (
+        <div className={cn(
+            "relative group overflow-hidden bg-white border rounded-[40px] p-8 shadow-xl shadow-slate-200/40 transition-all duration-500 hover:scale-[1.02]",
+            variants[variant],
+            className
+        )}>
+            <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/50 rounded-full blur-3xl group-hover:bg-white/80 transition-colors"></div>
+            <div className="relative z-10">
+                <div className="flex items-center justify-between mb-6">
+                    <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm", iconBg[variant])}>
+                        <Icon size={28} />
+                    </div>
+                </div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">{title}</p>
+                <h4 className="text-3xl font-black text-slate-900 tabular-nums tracking-tighter">
+                    {value}
+                </h4>
+            </div>
+        </div>
+    );
+};
 
 const ItemsPage = () => {
   const toast = useToast();
@@ -305,189 +364,262 @@ const ItemsPage = () => {
       }
   };
 
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 lg:gap-0">
-        <div className="flex items-center gap-3 lg:gap-4">
-            <div className="w-10 h-10 lg:w-14 lg:h-14 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-xl lg:rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-indigo-200 ring-4 ring-white shrink-0">
-                <Package size={20} className="lg:w-7 lg:h-7" />
-            </div>
-            <div>
-                <h1 className="text-xl lg:text-3xl font-black text-slate-900 tracking-tight uppercase lg:normal-case">Menu & Items</h1>
-                <p className="text-slate-500 font-medium italic text-[10px] lg:text-sm">Configure your restaurant's food and drink offerings</p>
-            </div>
-        </div>
-        <AppButton icon={Plus} size="lg" className="w-full sm:w-auto uppercase tracking-widest text-[10px] lg:text-xs font-black" onClick={() => { resetForm(); setEditingItem(null); setShowModal(true); }}>Add New Item</AppButton>
-      </header>
+  const lowStockCount = items.filter(i => i.track_stock && parseFloat(i.stock_qty) <= parseFloat(i.low_stock_threshold)).length;
 
-      <AppCard className="overflow-visible">
-        <div className="flex flex-col lg:flex-row gap-4 mb-6 lg:mb-8">
-            <div className="flex-1 relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors lg:w-5 lg:h-5" size={18} />
-                <input 
-                    type="text" 
-                    placeholder="Search items..." 
-                    className="w-full bg-slate-50 border-2 border-transparent rounded-[20px] lg:rounded-[24px] py-3 lg:py-4 pl-12 pr-4 text-slate-900 font-bold outline-none focus:bg-white focus:border-indigo-600 transition-all shadow-inner text-sm lg:text-base"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+  return (
+    <div className="flex flex-col h-[calc(100vh-130px)] space-y-4 animate-in fade-in duration-700 p-1 selection:bg-indigo-500/30 overflow-hidden bg-slate-50/50">
+      {/* Premium White Neural Header */}
+      <header className="relative group shrink-0">
+        <div className="absolute -inset-1 bg-gradient-to-r from-indigo-600 via-purple-600 to-emerald-500 rounded-[32px] blur opacity-10 group-hover:opacity-20 transition duration-1000"></div>
+        <div className="relative flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 bg-white p-6 rounded-[32px] border border-slate-100 shadow-2xl shadow-slate-200/50 overflow-hidden">
+            <div className="flex items-center gap-6 relative z-10">
+                <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl flex items-center justify-center text-white shadow-2xl shadow-indigo-500/40 group-hover:scale-110 transition-transform duration-500">
+                    <Package size={32} />
+                </div>
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Sparkles size={14} className="text-indigo-600" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-600">Inventory Nexus</span>
+                    </div>
+                    <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-1 uppercase">Menu Assets</h2>
+                    <p className="text-sm font-medium text-slate-400">Manage digital menu offerings and stock synchronization</p>
+                </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto relative z-10">
+                <AppButton 
+                    variant="primary" 
+                    icon={Plus} 
+                    size="lg" 
+                    className="w-full sm:w-auto rounded-[24px] px-10 py-6 bg-indigo-600 hover:bg-indigo-500 shadow-2xl shadow-indigo-500/20 font-black uppercase tracking-widest text-xs border-none" 
+                    onClick={() => { resetForm(); setEditingItem(null); setShowModal(true); }}
+                >
+                    Enroll Asset
+                </AppButton>
+                <AppButton 
+                    variant="secondary" 
+                    icon={RefreshCw} 
+                    size="lg" 
+                    className="rounded-[24px] bg-white border-slate-100 text-slate-400 hover:text-indigo-600 shadow-sm" 
+                    onClick={fetchItems} 
+                    loading={loading}
                 />
             </div>
-            <div className="flex gap-2">
-                <select 
-                    className="flex-1 lg:flex-none bg-slate-50 border-2 border-transparent rounded-[16px] lg:rounded-[20px] px-3 lg:px-4 py-2 text-[10px] lg:text-xs font-black text-slate-700 outline-none focus:border-indigo-600 transition-all shadow-sm"
-                    value={categoryFilter}
-                    onChange={(e) => setCategoryFilter(e.target.value)}
-                >
-                    {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-                <select 
-                    className="flex-1 lg:flex-none bg-slate-50 border-2 border-transparent rounded-[16px] lg:rounded-[20px] px-3 lg:px-4 py-2 text-[10px] lg:text-xs font-black text-slate-700 outline-none focus:border-indigo-600 transition-all shadow-sm"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                    <option value="All">All Status</option>
-                    <option value="available">Available</option>
-                    <option value="sold_out">Sold Out</option>
-                    <option value="temporarily_unavailable">Unavailable</option>
-                    <option value="inactive">Inactive</option>
-                </select>
+        </div>
+      </header>
+
+      {/* Stats Quick Matrix */}
+      <section className="grid grid-cols-1 md:grid-cols-4 gap-8 shrink-0">
+          <GlassCard 
+            title="Total Assets" 
+            value={items.length} 
+            icon={Layers} 
+            variant="primary" 
+          />
+          <GlassCard 
+            title="Active Menu" 
+            value={items.filter(i => i.status === 'active').length} 
+            icon={CheckCircle2} 
+            variant="success" 
+          />
+          <GlassCard 
+            title="Low Stock" 
+            value={lowStockCount} 
+            icon={AlertTriangle} 
+            variant={lowStockCount > 0 ? "danger" : "success"} 
+          />
+          <GlassCard 
+            title="Sold Out" 
+            value={items.filter(i => i.availability_status === 'sold_out').length} 
+            icon={XCircle} 
+            variant="warning" 
+          />
+      </section>
+
+      {/* Filter & Search Matrix */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 shrink-0">
+          <div className="lg:col-span-6 relative group">
+              <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
+                  <Search className="text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={20} />
+              </div>
+              <input 
+                  type="text" 
+                  placeholder="Identify asset by name, category or protocol..." 
+                  className="w-full bg-white border border-slate-100 rounded-[32px] py-6 pl-16 pr-8 text-slate-900 font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-xl shadow-slate-200/40"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+              />
+          </div>
+          <div className="lg:col-span-3">
+              <select 
+                  className="w-full bg-white border border-slate-100 rounded-[32px] py-6 px-8 text-xs font-black text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-xl shadow-slate-200/40 appearance-none"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+              >
+                  {categories.map(cat => <option key={cat} value={cat}>{cat === 'All' ? 'ALL CATEGORIES' : cat.toUpperCase()}</option>)}
+              </select>
+          </div>
+          <div className="lg:col-span-3">
+              <select 
+                  className="w-full bg-white border border-slate-100 rounded-[32px] py-6 px-8 text-xs font-black text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-xl shadow-slate-200/40 appearance-none"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                  <option value="All">ALL STATUS</option>
+                  <option value="available">AVAILABLE</option>
+                  <option value="sold_out">SOLD OUT</option>
+                  <option value="temporarily_unavailable">UNAVAILABLE</option>
+                  <option value="inactive">INACTIVE</option>
+              </select>
+          </div>
+      </div>
+
+      {/* Main Asset Table - Fixed Height & Scrollable */}
+      <div className="flex-1 min-h-0 relative group">
+        <div className="absolute -inset-0.5 bg-gradient-to-b from-white/10 to-transparent rounded-[44px] blur opacity-10"></div>
+        <div className="relative bg-white border border-slate-100 rounded-[44px] h-full overflow-hidden shadow-2xl shadow-slate-200/40 flex flex-col">
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <ResponsiveDataList 
+                    loading={loading}
+                    data={filteredItems}
+                    headers={[
+                        { label: 'Asset Identification' },
+                        { label: 'Category' },
+                        { label: 'Valuation', className: 'text-right' },
+                        { label: 'Telemetry', className: 'text-center' },
+                        { label: 'Availability', className: 'text-center' },
+                        { label: 'Protocols', className: 'text-right' }
+                    ]}
+                    renderRow={(item) => (
+                        <tr key={item.id} className={cn("hover:bg-slate-50 transition-all group border-b border-slate-50 last:border-0", item.status === 'inactive' && "opacity-60 grayscale bg-slate-50/30")}>
+                            <td className="py-8 px-10">
+                                <div className="flex flex-col">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
+                                            <Package size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="font-black text-slate-900 text-lg leading-tight uppercase tracking-tighter">{item.name}</p>
+                                            <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mt-1">
+                                                {!!item.short_code && item.short_code !== "0" && <span className="text-indigo-600 font-black mr-2">[{item.short_code}]</span>}
+                                                {item.portion_label || 'Standard'} • {item.status.toUpperCase()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td className="py-8">
+                                <span className="px-4 py-1.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-black uppercase tracking-widest group-hover:bg-indigo-600 group-hover:text-white transition-colors">{item.category}</span>
+                            </td>
+                            <td className="py-8 text-right px-10">
+                                <button 
+                                    onClick={() => { setPriceItem(item); setNewPrice(item.price); setShowPriceModal(true); }}
+                                    className="font-black text-slate-900 group-hover:text-indigo-600 text-xl transition-colors tabular-nums"
+                                >
+                                    Rs. {parseFloat(item.price).toLocaleString()}
+                                </button>
+                            </td>
+                            <td className="py-8 text-center">
+                                {item.track_stock ? (
+                                    <div className={cn(
+                                        "inline-flex flex-col items-center p-3 rounded-2xl border transition-all min-w-[80px]",
+                                        parseFloat(item.stock_qty) <= parseFloat(item.low_stock_threshold) ? "bg-rose-50 border-rose-100 text-rose-600" : "bg-slate-50 border-slate-100 text-slate-900 group-hover:bg-white"
+                                    )}>
+                                        <span className="font-black text-base">{item.stock_qty}</span>
+                                        <span className="text-[8px] opacity-60 uppercase font-black tracking-widest mt-0.5">Level</span>
+                                    </div>
+                                ) : (
+                                    <span className="text-[9px] text-slate-300 uppercase font-black tracking-[0.3em]">No Track</span>
+                                )}
+                            </td>
+                            <td className="py-8 text-center px-10">
+                                <div className="flex flex-col items-center gap-3">
+                                    {getAvailabilityBadge(item.availability_status)}
+                                    <div className="flex gap-1 p-1 bg-slate-50 rounded-xl border border-slate-100">
+                                        <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'available'}); setShowAvailabilityModal(true); }} className="p-2 hover:bg-white text-emerald-600 rounded-lg shadow-sm transition-all" title="Mark Available"><CheckCircle2 size={14} /></button>
+                                        <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'sold_out'}); setShowAvailabilityModal(true); }} className="p-2 hover:bg-white text-rose-600 rounded-lg shadow-sm transition-all" title="Mark Sold Out"><XCircle size={14} /></button>
+                                        <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'temporarily_unavailable'}); setShowAvailabilityModal(true); }} className="p-2 hover:bg-white text-amber-600 rounded-lg shadow-sm transition-all" title="Mark Unavailable"><Clock size={14} /></button>
+                                    </div>
+                                </div>
+                            </td>
+                            <td className="py-8 text-right px-10">
+                                <div className="flex justify-end gap-2">
+                                    <AppButton variant="ghost" size="sm" icon={Edit} className="w-10 h-10 rounded-xl hover:bg-indigo-50 text-indigo-600" onClick={() => handleEdit(item)} />
+                                    {item.track_stock === 1 && (
+                                        <AppButton variant="ghost" size="sm" icon={Package} onClick={() => handleReceiveStock(item)} className="w-10 h-10 rounded-xl hover:bg-indigo-50 text-indigo-600" />
+                                    )}
+                                    <AppButton 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        icon={item.status === 'active' ? EyeOff : Eye} 
+                                        onClick={() => toggleStatus(item)}
+                                        className={cn("w-10 h-10 rounded-xl", item.status === 'active' ? "text-slate-400 hover:bg-slate-50" : "text-emerald-600 hover:bg-emerald-50")}
+                                    />
+                                    <AppButton 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        icon={Trash2} 
+                                        onClick={() => handleDelete(item)}
+                                        className="w-10 h-10 rounded-xl text-rose-400 hover:text-rose-600 hover:bg-rose-50"
+                                    />
+                                </div>
+                            </td>
+                        </tr>
+                    )}
+                    renderCard={(item) => (
+                        <div key={item.id} className={cn("p-8 space-y-6 bg-white border-b border-slate-50 last:border-0", item.status === 'inactive' && "opacity-60 grayscale")}>
+                            <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
+                                        <Package size={24} />
+                                    </div>
+                                    <div>
+                                        <p className="text-lg font-black text-slate-900 uppercase tracking-tight leading-none">{item.name}</p>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{item.category} • {item.portion_label || 'Single'}</p>
+                                    </div>
+                                </div>
+                                {getAvailabilityBadge(item.availability_status)}
+                            </div>
+                            
+                            <div className="flex justify-between items-center p-6 bg-slate-50 rounded-[32px] border border-slate-100">
+                                <div className="flex flex-col">
+                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Valuation</p>
+                                    <p className="text-xl font-black text-indigo-600 tabular-nums">Rs. {parseFloat(item.price).toLocaleString()}</p>
+                                </div>
+                                {item.track_stock && (
+                                    <div className="text-right">
+                                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Stock Level</p>
+                                        <p className={cn("text-xl font-black tabular-nums", parseFloat(item.stock_qty) <= parseFloat(item.low_stock_threshold) ? "text-rose-500" : "text-slate-900")}>{item.stock_qty}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <AppButton variant="secondary" size="lg" className="rounded-2xl border-slate-200" icon={Edit} onClick={() => handleEdit(item)}>Edit</AppButton>
+                                <AppButton variant="secondary" size="lg" className="rounded-2xl border-slate-200" icon={Trash2} onClick={() => handleDelete(item)}>Delete</AppButton>
+                                {item.track_stock === 1 && (
+                                    <AppButton variant="primary" size="lg" className="col-span-2 rounded-2xl shadow-lg shadow-indigo-100 bg-indigo-600 border-none" icon={Package} onClick={() => handleReceiveStock(item)}>Restock Asset</AppButton>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                />
             </div>
         </div>
-
-        <ResponsiveDataList 
-            loading={loading}
-            data={filteredItems}
-            headers={[
-                { label: 'Item Details' },
-                { label: 'Category' },
-                { label: 'Price', className: 'text-right' },
-                { label: 'Inventory', className: 'text-center' },
-                { label: 'Availability', className: 'text-center' },
-                { label: 'Actions', className: 'text-right' }
-            ]}
-            renderRow={(item) => (
-                <tr key={item.id} className={cn("hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0", item.status === 'inactive' && "opacity-60 grayscale bg-slate-50/30")}>
-                    <td className="py-5">
-                        <div className="flex flex-col">
-                            <p className="font-black text-slate-900 leading-tight">{item.name}</p>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-                                {!!item.short_code && item.short_code !== "0" && <span className="text-indigo-600 font-black mr-2">[{item.short_code}]</span>}
-                                {item.portion_label || 'Single'} • {item.status.toUpperCase()}
-                                {!!item.is_popular && <span className="ml-2 text-amber-500 font-black">★ POPULAR</span>}
-                            </p>
-                        </div>
-                    </td>
-                    <td className="py-5">
-                        <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-black uppercase tracking-widest">{item.category}</span>
-                    </td>
-                    <td className="py-5 text-right">
-                        <button 
-                            onClick={() => { setPriceItem(item); setNewPrice(item.price); setShowPriceModal(true); }}
-                            className="font-black text-indigo-600 hover:scale-110 transition-transform flex items-center justify-end gap-1 ml-auto group"
-                        >
-                            Rs. {parseFloat(item.price).toLocaleString()}
-                            <Edit size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </button>
-                    </td>
-                    <td className="py-5 text-center">
-                        {item.track_stock ? (
-                            <div className="inline-flex flex-col items-center p-2 bg-slate-50 rounded-xl border border-slate-100">
-                                <span className={cn("font-black text-xs", parseFloat(item.stock_qty) <= parseFloat(item.low_stock_threshold) ? "text-rose-600" : "text-slate-900")}>
-                                    {item.stock_qty}
-                                </span>
-                                <span className="text-[8px] text-slate-400 uppercase font-bold">Min: {item.low_stock_threshold}</span>
-                            </div>
-                        ) : (
-                            <span className="text-[8px] text-slate-300 uppercase font-black tracking-widest">No Track</span>
-                        )}
-                    </td>
-                    <td className="py-5 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                            {getAvailabilityBadge(item.availability_status)}
-                            <div className="flex gap-1 mt-1">
-                                <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'available'}); setShowAvailabilityModal(true); }} className="p-1 hover:bg-emerald-100 rounded transition-colors text-emerald-600" title="Mark Available"><CheckCircle2 size={12} /></button>
-                                <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'sold_out'}); setShowAvailabilityModal(true); }} className="p-1 hover:bg-rose-100 rounded transition-colors text-rose-600" title="Mark Sold Out"><XCircle size={12} /></button>
-                                <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'temporarily_unavailable'}); setShowAvailabilityModal(true); }} className="p-1 hover:bg-amber-100 rounded transition-colors text-amber-600" title="Mark Unavailable"><Clock size={12} /></button>
-                            </div>
-                        </div>
-                    </td>
-                    <td className="py-5 text-right">
-                        <div className="flex justify-end gap-1">
-                            <AppButton variant="ghost" size="sm" icon={Edit} onClick={() => handleEdit(item)} />
-                            {item.track_stock === 1 && (
-                                <AppButton variant="ghost" size="sm" icon={Package} onClick={() => handleReceiveStock(item)} className="text-indigo-600" />
-                            )}
-                            <AppButton 
-                                variant="ghost" 
-                                size="sm" 
-                                icon={item.status === 'active' ? EyeOff : Eye} 
-                                onClick={() => toggleStatus(item)}
-                                className={item.status === 'active' ? "text-slate-400" : "text-emerald-600"}
-                            />
-                            <AppButton 
-                                variant="ghost" 
-                                size="sm" 
-                                icon={Trash2} 
-                                onClick={() => handleDelete(item)}
-                                className="text-rose-400 hover:text-rose-600"
-                            />
-                        </div>
-                    </td>
-                </tr>
-            )}
-            renderCard={(item) => (
-                <div key={item.id} className={cn("p-5 space-y-4", item.status === 'inactive' && "opacity-60 grayscale")}>
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-sm font-black text-slate-900 uppercase tracking-tight">{item.name}</p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.category} • {item.portion_label || 'Single'}</p>
-                        </div>
-                        {getAvailabilityBadge(item.availability_status)}
-                    </div>
-                    
-                    <div className="flex justify-between items-center py-2 border-y border-slate-50">
-                        <div className="flex flex-col">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Price</p>
-                            <p className="text-sm font-black text-indigo-600">Rs. {parseFloat(item.price).toLocaleString()}</p>
-                        </div>
-                        {item.track_stock && (
-                            <div className="text-right">
-                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Stock</p>
-                                <p className={cn("text-sm font-black", parseFloat(item.stock_qty) <= parseFloat(item.low_stock_threshold) ? "text-rose-500" : "text-slate-900")}>{item.stock_qty}</p>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex gap-2">
-                        <AppButton variant="secondary" size="sm" className="px-2" icon={Edit} onClick={() => handleEdit(item)} />
-                        <AppButton variant="secondary" size="sm" className="px-2" icon={DollarSign} onClick={() => { setPriceItem(item); setNewPrice(item.price); setShowPriceModal(true); }} />
-                        <AppButton variant="secondary" size="sm" className="px-2 text-rose-500" icon={Trash2} onClick={() => handleDelete(item)} />
-                        {item.track_stock === 1 && (
-                            <AppButton variant="secondary" size="sm" className="flex-1" icon={Package} onClick={() => handleReceiveStock(item)}>Stock</AppButton>
-                        )}
-                        <div className="flex gap-1 bg-slate-50 p-1 rounded-xl">
-                            <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'available'}); setShowAvailabilityModal(true); }} className="p-2 hover:bg-white text-emerald-600 rounded-lg shadow-sm transition-all"><CheckCircle2 size={14} /></button>
-                            <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'sold_out'}); setShowAvailabilityModal(true); }} className="p-2 hover:bg-white text-rose-600 rounded-lg shadow-sm transition-all"><XCircle size={14} /></button>
-                            <button onClick={() => { setAvailabilityItem({...item, nextStatus: 'temporarily_unavailable'}); setShowAvailabilityModal(true); }} className="p-2 hover:bg-white text-amber-600 rounded-lg shadow-sm transition-all"><Clock size={14} /></button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        />
-      </AppCard>
+      </div>
 
       {/* Main Add/Edit Modal */}
       <AppModal
         isOpen={showModal}
         onClose={() => setShowModal(false)}
-        title={editingItem ? "Update Menu Item" : "Add Menu Item"}
+        title={editingItem ? "Update Asset Protocol" : "Enroll New Asset"}
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
-                <FormInput label="Item Name" icon={Tag} required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                <FormInput label="Asset Name" icon={Tag} required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 <FormSelect 
-                    label="Sub-Category"
+                    label="Sub-Category Protocol"
                     value={formData.category}
                     onChange={e => setFormData({...formData, category: e.target.value})}
                     options={[
@@ -659,66 +791,6 @@ const ItemsPage = () => {
                 />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormInput label="Barcode (Optional)" value={formData.barcode} onChange={e => setFormData({...formData, barcode: e.target.value})} />
-                
-                <div className="flex flex-col gap-2 justify-center">
-                    <label className="flex items-center gap-2 cursor-pointer mt-2">
-                        <input 
-                            type="checkbox" 
-                            checked={formData.send_to_kitchen} 
-                            onChange={e => setFormData({...formData, send_to_kitchen: e.target.checked})}
-                            className="w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest">Send to Kitchen (KOT)</span>
-                    </label>
-                    
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                            type="checkbox" 
-                            checked={formData.is_quick_retail} 
-                            onChange={e => setFormData({...formData, is_quick_retail: e.target.checked})}
-                            className="w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest">Quick Retail (No-Bill)</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                            type="checkbox" 
-                            checked={formData.is_restaurant_item} 
-                            onChange={e => setFormData({...formData, is_restaurant_item: e.target.checked})}
-                            className="w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest">Restaurant Menu Item</span>
-                    </label>
-                </div>
-            </div>
-
-            {formData.item_type === 'restricted_retail' && (
-                <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl flex flex-col gap-2">
-                    <p className="text-xs font-bold text-rose-700 uppercase">Age Restriction Settings</p>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                            type="checkbox" 
-                            checked={formData.age_restricted} 
-                            onChange={e => setFormData({...formData, age_restricted: e.target.checked})}
-                            className="w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest">Age Restricted Item</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                            type="checkbox" 
-                            checked={formData.requires_age_confirmation} 
-                            onChange={e => setFormData({...formData, requires_age_confirmation: e.target.checked})}
-                            className="w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest">Require Age Confirmation on Checkout</span>
-                    </label>
-                </div>
-            )}
-            
             <div className="p-5 lg:p-6 bg-slate-900 rounded-[28px] lg:rounded-3xl space-y-4 lg:space-y-6 border border-slate-800 shadow-2xl">
                 <div className="flex items-center justify-between">
                     <div>
@@ -757,212 +829,10 @@ const ItemsPage = () => {
                     </div>
                 )}
             </div>
-
-            {/* Public Menu Section */}
-            <div className="p-5 lg:p-6 bg-white rounded-[28px] lg:rounded-3xl space-y-4 lg:space-y-6 border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <label className="text-[9px] lg:text-[10px] font-black text-indigo-600 uppercase tracking-widest">Digital Menu (QR)</label>
-                        <p className="text-[8px] lg:text-[10px] text-slate-500 font-bold">Public visibility and details</p>
-                    </div>
-                    <button 
-                        type="button"
-                        onClick={() => setFormData({...formData, show_on_public_menu: !formData.show_on_public_menu})}
-                        className={cn("w-12 h-6 lg:w-14 lg:h-7 rounded-full transition-all relative ring-4", formData.show_on_public_menu ? "bg-indigo-600 ring-indigo-100" : "bg-slate-200 ring-slate-50")}
-                    >
-                        <div className={cn("absolute top-1 w-4 h-4 lg:w-5 lg:h-5 bg-white rounded-full shadow-lg transition-all", formData.show_on_public_menu ? "right-1" : "left-1")}></div>
-                    </button>
-                </div>
-
-                {formData.show_on_public_menu && (
-                    <div className="space-y-4 animate-in fade-in duration-300">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <FormInput 
-                                label="Public Display Order" 
-                                type="number" 
-                                value={formData.public_display_order} 
-                                onChange={e => setFormData({...formData, public_display_order: e.target.value})} 
-                            />
-                            <FormSelect 
-                                label="Spice Level"
-                                value={formData.spice_level}
-                                onChange={e => setFormData({...formData, spice_level: e.target.value})}
-                                options={[
-                                    { value: 'none', label: 'None' },
-                                    { value: 'mild', label: 'Mild' },
-                                    { value: 'medium', label: 'Medium' },
-                                    { value: 'spicy', label: 'Spicy' },
-                                    { value: 'extra_spicy', label: 'Extra Spicy' }
-                                ]}
-                            />
-                        </div>
-                        
-                        <div className="flex gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input 
-                                    type="checkbox" 
-                                    checked={formData.is_veg} 
-                                    onChange={e => setFormData({...formData, is_veg: e.target.checked})}
-                                    className="w-5 h-5 rounded-lg border-2 border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                                />
-                                <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest text-emerald-600">Veg Item</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input 
-                                    type="checkbox" 
-                                    checked={formData.is_featured} 
-                                    onChange={e => setFormData({...formData, is_featured: e.target.checked})}
-                                    className="w-5 h-5 rounded-lg border-2 border-slate-300 text-amber-600 focus:ring-amber-500"
-                                />
-                                <span className="text-[10px] lg:text-xs font-black text-slate-700 uppercase tracking-widest text-amber-600">Featured</span>
-                            </label>
-                        </div>
-
-                        <FormInput 
-                            label="Public Image URL" 
-                            placeholder="https://example.com/image.jpg" 
-                            value={formData.image_url} 
-                            onChange={e => setFormData({...formData, image_url: e.target.value})} 
-                        />
-                        
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Public Description</label>
-                            <textarea 
-                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm font-bold text-slate-900 outline-none focus:border-indigo-600 h-24 resize-none"
-                                placeholder="Write a customer-friendly description..."
-                                value={formData.public_description}
-                                onChange={e => setFormData({...formData, public_description: e.target.value})}
-                            />
-                        </div>
-                    </div>
-                )}
-            </div>
-
-
-
+            
             <div className="flex gap-4 pt-4">
-                <AppButton variant="secondary" className="flex-1" type="button" onClick={() => setShowModal(false)}>Cancel</AppButton>
-                <AppButton variant="primary" className="flex-1" type="submit">Save Menu Item</AppButton>
-            </div>
-        </form>
-      </AppModal>
-
-      {/* Price Update Modal */}
-      <AppModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Update Price" size="sm">
-          <form onSubmit={handleUpdatePrice} className="space-y-6">
-              <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 mb-4">
-                  <p className="text-xs font-bold text-indigo-700 uppercase">Current Item</p>
-                  <p className="text-lg font-black text-slate-900">{priceItem?.name}</p>
-              </div>
-              <FormInput label="New Price (Rs.)" type="number" icon={DollarSign} autoFocus required value={newPrice} onChange={e => setNewPrice(e.target.value)} />
-              <div className="flex gap-3">
-                  <AppButton variant="secondary" className="flex-1" type="button" onClick={() => setShowPriceModal(false)}>Cancel</AppButton>
-                  <AppButton variant="primary" className="flex-1" type="submit">Update Price</AppButton>
-              </div>
-          </form>
-      </AppModal>
-
-      {/* Availability Update Modal */}
-      <AppModal isOpen={showAvailabilityModal} onClose={() => setShowAvailabilityModal(false)} title="Change Availability" size="sm">
-          <form onSubmit={handleUpdateAvailability} className="space-y-6">
-              <div className={cn(
-                  "p-4 rounded-2xl border mb-4",
-                  availabilityItem?.nextStatus === 'available' ? "bg-emerald-50 border-emerald-100" :
-                  availabilityItem?.nextStatus === 'sold_out' ? "bg-rose-50 border-rose-100" : "bg-amber-50 border-amber-100"
-              )}>
-                  <p className="text-[10px] font-black uppercase mb-1">Set Status To</p>
-                  <p className="text-xl font-black uppercase tracking-tighter">
-                      {availabilityItem?.nextStatus?.replace('_', ' ') || ''}
-                  </p>
-              </div>
-              <FormInput label="Reason (Optional)" icon={Clock} placeholder="e.g. Out of stock, Kitchen busy..." value={availabilityReason} onChange={e => setAvailabilityReason(e.target.value)} />
-              <div className="flex gap-3">
-                  <AppButton variant="secondary" className="flex-1" type="button" onClick={() => setShowAvailabilityModal(false)}>Cancel</AppButton>
-                  <AppButton 
-                    className="flex-1" 
-                    variant={availabilityItem?.nextStatus === 'available' ? 'primary' : 'danger'} 
-                    type="submit"
-                  >
-                      Confirm Change
-                  </AppButton>
-              </div>
-          </form>
-      </AppModal>
-      {/* Receive Stock Modal */}
-      <AppModal
-        isOpen={showReceiveModal}
-        onClose={() => setShowReceiveModal(false)}
-        title={`Receive Stock: ${receiveItem?.name || ''}`}
-      >
-        <form onSubmit={submitReceiveStock} className="space-y-6">
-            <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 mb-4">
-                <div className="flex justify-between items-center">
-                    <p className="text-sm font-bold text-indigo-900">Current Stock</p>
-                    <p className="text-xl font-black text-indigo-600">{receiveItem?.stock_qty} {receiveItem?.unit_type}s</p>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <FormSelect
-                    label="Purchase Unit"
-                    value={receiveData.purchase_unit_type}
-                    onChange={(e) => setReceiveData({...receiveData, purchase_unit_type: e.target.value})}
-                    options={[
-                        { label: 'Pack', value: 'pack' },
-                        { label: 'Carton', value: 'carton' },
-                        { label: 'Bottle', value: 'bottle' },
-                        { label: 'Packet', value: 'packet' },
-                        { label: 'Item', value: 'item' }
-                    ]}
-                />
-                <FormInput
-                    label="Qty of Purchase Units"
-                    type="number"
-                    step="0.01"
-                    value={receiveData.purchase_unit_qty}
-                    onChange={(e) => setReceiveData({...receiveData, purchase_unit_qty: e.target.value})}
-                    placeholder="e.g. 10 packs"
-                    required
-                />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <FormInput
-                    label="Units Per Pack"
-                    type="number"
-                    value={receiveData.units_per_purchase_unit}
-                    onChange={(e) => setReceiveData({...receiveData, units_per_purchase_unit: e.target.value})}
-                    required
-                />
-                <div className="flex flex-col justify-end">
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Sticks Added</p>
-                        <p className="text-lg font-black text-indigo-600">
-                            {(parseFloat(receiveData.purchase_unit_qty || 0) * parseInt(receiveData.units_per_purchase_unit || 1)).toFixed(0)}
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <FormInput
-                label="Cost Per Purchase Unit (Optional)"
-                type="number"
-                step="0.01"
-                value={receiveData.cost_per_purchase_unit}
-                onChange={(e) => setReceiveData({...receiveData, cost_per_purchase_unit: e.target.value})}
-                placeholder="e.g. 1500"
-            />
-
-            <FormInput
-                label="Note"
-                value={receiveData.note}
-                onChange={(e) => setReceiveData({...receiveData, note: e.target.value})}
-                placeholder="Reason for receiving stock"
-            />
-
-            <div className="flex justify-end gap-3 pt-4">
-                <AppButton type="button" variant="ghost" onClick={() => setShowReceiveModal(false)}>Cancel</AppButton>
-                <AppButton type="submit" variant="primary">Confirm Receipt</AppButton>
+                <AppButton variant="secondary" className="flex-1 py-6 rounded-[24px] font-black uppercase tracking-[0.2em] text-xs" type="button" onClick={() => setShowModal(false)}>Abort</AppButton>
+                <AppButton variant="primary" className="flex-[2] py-6 rounded-[24px] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-indigo-500/20 bg-indigo-600 border-none" type="submit">Commit Changes</AppButton>
             </div>
         </form>
       </AppModal>

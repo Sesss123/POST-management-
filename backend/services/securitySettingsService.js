@@ -26,9 +26,20 @@ class SecuritySettingsService {
 
     async refresh() {
         try {
-            const [rows] = await db.query('SELECT setting_key, setting_value FROM platform_settings WHERE setting_key LIKE "security_%"');
-            rows.forEach(row => {
-                this.settings[row.setting_key] = parseInt(row.setting_value) || this.settings[row.setting_key];
+            const [rows] = await db.query('SELECT setting_key, setting_value FROM platform_settings');
+            const platformSettings = rows.reduce((acc, row) => {
+                acc[row.setting_key] = row.setting_value;
+                return acc;
+            }, {});
+
+            const securityLevel = platformSettings.system_security_level || 'high';
+            let multiplier = 1;
+            if (securityLevel === 'high') multiplier = 0.5; // Tighter limits
+            if (securityLevel === 'low') multiplier = 2; // Relaxed limits
+
+            rows.filter(row => row.setting_key.startsWith('security_')).forEach(row => {
+                const baseVal = parseInt(row.setting_value) || this.settings[row.setting_key];
+                this.settings[row.setting_key] = Math.ceil(baseVal * multiplier);
             });
         } catch (err) {
             console.error('Failed to refresh security settings:', err);

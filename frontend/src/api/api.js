@@ -11,7 +11,8 @@ export const invoiceApi = {
     createTableSplit: (data) => apiClient.post('/invoices/table-sale/split', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
     cancel: (id, reason) => apiClient.patch(`/invoices/${id}/cancel`, { reason }),
     voidInvoice: (id) => apiClient.delete(`/invoices/${id}/void`),
-    createQuickRetailSale: (data) => apiClient.post('/invoices/quick-retail-sale', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } })
+    createQuickRetailSale: (data) => apiClient.post('/invoices/quick-retail-sale', data, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+    getQuickHistory: (params) => apiClient.get('/invoices', { params: { sale_channel: 'quick_no_receipt', ...params } })
 };
 
 export const quickRetailApi = {
@@ -44,7 +45,8 @@ export const reportApi = {
     getCreditSummary: () => apiClient.get('/reports/credit-summary'),
     getAnalytics: (from, to) => apiClient.get(`/reports/analytics?from=${from}&to=${to}`),
     getAlerts: () => apiClient.get('/reports/alerts'),
-    getBI: (params) => apiClient.get('/reports/business-intelligence', { params })
+    getBI: (params) => apiClient.get('/reports/business-intelligence', { params }),
+    getCashCollection: (params) => apiClient.get('/reports/cash-collection', { params })
 };
 
 export const userApi = {
@@ -63,7 +65,8 @@ export const itemApi = {
     updateAvailability: (id, status, reason) => apiClient.patch(`/items/${id}/availability`, { availability_status: status, reason }),
     updateStatus: (id, status) => apiClient.patch(`/items/${id}/status`, { status }),
     delete: (id) => apiClient.delete(`/items/${id}`),
-    receiveStock: (id, data) => apiClient.post(`/items/${id}/receive-stock`, data)
+    receiveStock: (id, data) => apiClient.post(`/items/${id}/receive-stock`, data),
+    syncPopular: () => apiClient.post('/items/sync-popular')
 };
 
 export const tableApi = {
@@ -89,7 +92,7 @@ export const sessionApi = {
 };
 
 export const kotApi = {
-    getAll: () => apiClient.get('/kot'),
+    getAll: (date) => apiClient.get(`/kot${date ? `?date=${date}` : ''}`),
     getDetails: (id) => apiClient.get(`/kot/${id}`),
     getById: (id) => apiClient.get(`/kot/${id}`),
     getBySession: (sessionId) => apiClient.get(`/kot/session/${sessionId}`),
@@ -210,6 +213,10 @@ export const auditApi = {
 export const publicMenuApi = {
     getItems: (params) => apiClient.get('/public-menu/items', { params }),
     getTableInfo: (tableNo) => apiClient.get(`/public-menu/table/${tableNo}`)
+};
+
+export const announcementApi = {
+    getActive: () => apiClient.get('/announcements/active')
 };
 
 export const superAdminApi = {

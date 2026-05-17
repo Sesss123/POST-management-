@@ -1,5 +1,85 @@
 const { db } = require('../config/db');
 
+// @desc    Get Cash Collection Report
+// @route   GET /api/reports/cash-collection
+// @access  Private/Admin
+exports.getCashCollectionReport = async (req, res) => {
+    const { from, to } = req.query;
+    const startDate = from || new Date().toISOString().split('T')[0];
+    const endDate = to || new Date().toISOString().split('T')[0];
+
+    try {
+        // 1. Cash from Invoices (POS & Quick Retail)
+        const [invoiceCash] = await db.query(`
+            SELECT 
+                DATE(created_at) as date,
+                'POS Sale' as type,
+                invoice_no as reference,
+                payment_method,
+                grand_total as amount,
+                created_at
+            FROM invoices
+            WHERE shop_id = ? 
+            AND DATE(created_at) BETWEEN ? AND ?
+            AND payment_method = 'cash'
+            AND payment_status != 'cancelled'
+        `, [req.shopId, startDate, endDate]);
+
+        // 2. Cash from Debt (Naya) Payments
+        const [debtCash] = await db.query(`
+            SELECT 
+                DATE(p.created_at) as date,
+                'Debt Payment' as type,
+                c.name as reference,
+                p.payment_method,
+                p.amount,
+                p.created_at
+            FROM payments p
+            JOIN customers c ON p.customer_id = c.id
+            WHERE p.shop_id = ? 
+            AND DATE(p.created_at) BETWEEN ? AND ?
+            AND p.payment_method = 'cash'
+        `, [req.shopId, startDate, endDate]);
+
+        // 3. Cash Movements (Manual In/Out & Drawer Expenses)
+        const [movements] = await db.query(`
+            SELECT 
+                DATE(created_at) as date,
+                CASE WHEN type = 'cash_in' THEN 'Manual Cash In' ELSE 'Manual Cash Out' END as type,
+                reason as reference,
+                'cash' as payment_method,
+                CASE WHEN type = 'cash_in' THEN amount ELSE -amount END as amount,
+                created_at
+            FROM cash_movements
+            WHERE shop_id = ? 
+            AND DATE(created_at) BETWEEN ? AND ?
+        `, [req.shopId, startDate, endDate]);
+
+        // Merge all transactions
+        const allTransactions = [...invoiceCash, ...debtCash, ...movements].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        // Calculate Totals
+        const summary = {
+            total_sales_cash: invoiceCash.reduce((sum, item) => sum + parseFloat(item.amount), 0),
+            total_debt_cash: debtCash.reduce((sum, item) => sum + parseFloat(item.amount), 0),
+            total_cash_in: movements.filter(m => m.amount > 0).reduce((sum, item) => sum + parseFloat(item.amount), 0),
+            total_cash_out: Math.abs(movements.filter(m => m.amount < 0).reduce((sum, item) => sum + parseFloat(item.amount), 0)),
+        };
+        summary.net_cash = (summary.total_sales_cash + summary.total_debt_cash + summary.total_cash_in) - summary.total_cash_out;
+
+        res.json({
+            success: true,
+            data: {
+                summary,
+                transactions: allTransactions
+            }
+        });
+    } catch (error) {
+        console.error('Cash Collection Error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
 // @desc    Get dashboard summary
 // @route   GET /api/reports/dashboard
 // @access  Private
@@ -48,6 +128,16 @@ exports.getDashboardSummary = async (req, res) => {
             LIMIT 5
         `, [req.shopId]);
 
+        // Low Stock Items
+        const [lowStockItems] = await db.query(`
+            SELECT id, name, stock_qty, low_stock_threshold, availability_status
+            FROM items 
+            WHERE status = 'active' AND track_stock = 1 AND shop_id = ?
+            AND (stock_qty <= low_stock_threshold OR stock_qty <= 0 OR availability_status = 'sold_out')
+            ORDER BY stock_qty ASC
+            LIMIT 5
+        `, [req.shopId]);
+
         res.json({
             success: true,
             data: {
@@ -64,7 +154,8 @@ exports.getDashboardSummary = async (req, res) => {
                     totalNaya: parseFloat(totalNaya),
                     openTables
                 },
-                recentInvoices
+                recentInvoices,
+                lowStockItems
             }
         });
     } catch (error) {
@@ -434,22 +525,69 @@ exports.getAnalytics = async (req, res) => {
 
     try {
         // 1. Sales Trend (Revenue vs Collection)
-        const [salesTrend] = await db.query(`
+        // We calculate revenue from invoices and collection from both invoices (direct) and payments (debt)
+        
+        // Fetch Revenue
+        const [revRows] = await db.query(`
             SELECT 
-                DATE_FORMAT(i.created_at, '%b %d') as date, 
-                SUM(i.grand_total) as revenue, 
-                COALESCE((SELECT SUM(amount) FROM invoice_payments ip WHERE DATE(ip.created_at) = DATE(i.created_at) AND ip.shop_id = ?), 0) as collection,
+                DATE_FORMAT(created_at, '%Y-%m-%d') as date, 
+                SUM(grand_total) as revenue, 
                 COUNT(*) as count
-            FROM invoices i
-            WHERE DATE(i.created_at) BETWEEN ? AND ?
-            AND i.payment_status != 'cancelled'
-            AND i.shop_id = ?
-            GROUP BY DATE(i.created_at)
-            ORDER BY DATE(i.created_at) ASC
-        `, [req.shopId, startDate, endDate, req.shopId]);
+            FROM invoices
+            WHERE DATE(created_at) BETWEEN ? AND ?
+            AND payment_status != 'cancelled'
+            AND shop_id = ?
+            GROUP BY DATE(created_at)
+        `, [startDate, endDate, req.shopId]);
+
+        // Fetch Direct Collections (Paid at time of sale)
+        const [dirCollRows] = await db.query(`
+            SELECT 
+                DATE_FORMAT(created_at, '%Y-%m-%d') as date, 
+                SUM(paid_amount) as amount
+            FROM invoices
+            WHERE DATE(created_at) BETWEEN ? AND ?
+            AND payment_method != 'credit'
+            AND payment_status != 'cancelled'
+            AND shop_id = ?
+            GROUP BY DATE(created_at)
+        `, [startDate, endDate, req.shopId]);
+
+        // Fetch Debt Collections (Payments table)
+        const [debtCollRows] = await db.query(`
+            SELECT 
+                DATE_FORMAT(created_at, '%Y-%m-%d') as date, 
+                SUM(amount) as amount
+            FROM payments
+            WHERE DATE(created_at) BETWEEN ? AND ?
+            AND shop_id = ?
+            GROUP BY DATE(created_at)
+        `, [startDate, endDate, req.shopId]);
+
+        // Merge into a continuous timeline
+        const dates = [];
+        let curr = new Date(startDate);
+        const end = new Date(endDate);
+        while (curr <= end) {
+            dates.push(curr.toISOString().split('T')[0]);
+            curr.setDate(curr.getDate() + 1);
+        }
+
+        const salesTrend = dates.map(d => {
+            const rev = revRows.find(r => r.date === d);
+            const dir = dirCollRows.find(r => r.date === d);
+            const debt = debtCollRows.find(r => r.date === d);
+            
+            return {
+                date: new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                revenue: parseFloat(rev?.revenue || 0),
+                collection: parseFloat(dir?.amount || 0) + parseFloat(debt?.amount || 0),
+                count: rev?.count || 0
+            };
+        });
 
         // 2. Category Distribution (Revenue by Category)
-        const [categoryDist] = await db.query(`
+        const [catRows] = await db.query(`
             SELECT 
                 IFNULL(i.category, 'Uncategorized') as category, 
                 SUM(ii.total) as value
@@ -463,8 +601,13 @@ exports.getAnalytics = async (req, res) => {
             ORDER BY value DESC
         `, [startDate, endDate, req.shopId]);
 
+        const categoryDist = catRows.map(r => ({
+            category: r.category,
+            value: parseFloat(r.value || 0)
+        }));
+
         // 3. Payment Method Split
-        const [paymentSplit] = await db.query(`
+        const [payRows] = await db.query(`
             SELECT 
                 payment_method as name, 
                 SUM(grand_total) as value,
@@ -476,8 +619,14 @@ exports.getAnalytics = async (req, res) => {
             GROUP BY payment_method
         `, [startDate, endDate, req.shopId]);
 
+        const paymentSplit = payRows.map(r => ({
+            name: r.name,
+            value: parseFloat(r.value || 0),
+            count: r.count
+        }));
+
         // 4. Top 5 Items by Quantity
-        const [topItems] = await db.query(`
+        const [topItemRows] = await db.query(`
             SELECT 
                 item_name as name, 
                 SUM(qty) as value,
@@ -491,6 +640,12 @@ exports.getAnalytics = async (req, res) => {
             ORDER BY value DESC
             LIMIT 5
         `, [startDate, endDate, req.shopId]);
+
+        const topItems = topItemRows.map(r => ({
+            name: r.name,
+            value: parseInt(r.value || 0),
+            revenue: parseFloat(r.revenue || 0)
+        }));
 
         // 5. Hourly Distribution (Today - always today for 'Busy Hours')
         const [hourlyDist] = await db.query(`
@@ -527,7 +682,7 @@ exports.getAnalytics = async (req, res) => {
         `, [startDate, endDate, req.shopId]);
 
         // 7. Item Type Distribution (Revenue by Item Type)
-        const [itemTypeDist] = await db.query(`
+        const [typeRows] = await db.query(`
             SELECT 
                 COALESCE(i.item_type, 'food') as name, 
                 SUM(ii.total) as value
@@ -540,6 +695,11 @@ exports.getAnalytics = async (req, res) => {
             GROUP BY COALESCE(i.item_type, 'food')
             ORDER BY value DESC
         `, [startDate, endDate, req.shopId]);
+
+        const itemTypeDist = typeRows.map(r => ({
+            name: r.name,
+            value: parseFloat(r.value || 0)
+        }));
 
         res.json({
             success: true,
@@ -710,6 +870,17 @@ exports.getAlerts = async (req, res) => {
             }
         });
 
+        // 6b. No Open Shift Alert
+        const hasOpenShift = shiftAlerts.some(s => s.status === 'open');
+        if (!hasOpenShift) {
+            alerts.cash.push({
+                title: 'No Open Shift',
+                description: 'Terminal is inactive. Please open a shift to start billing.',
+                severity: 'critical',
+                link: '/shifts'
+            });
+        }
+
         res.json({
             success: true,
             data: alerts
@@ -837,7 +1008,7 @@ exports.getBusinessIntelligence = async (req, res) => {
         `, [startDate, endDate, req.shopId]);
 
         // 5. Category Performance
-        const [categoryPerformance] = await db.query(`
+        const [catPerfRows] = await db.query(`
             SELECT 
                 COALESCE(i.category, 'Uncategorized') as name, 
                 SUM(ii.total) as value
@@ -849,6 +1020,11 @@ exports.getBusinessIntelligence = async (req, res) => {
             GROUP BY name
             ORDER BY value DESC
         `, [startDate, endDate, req.shopId]);
+
+        const categoryPerformance = catPerfRows.map(r => ({
+            name: r.name,
+            value: parseFloat(r.value || 0)
+        }));
 
         // 6. Hourly Sales
         const [hourlyRaw] = await db.query(`

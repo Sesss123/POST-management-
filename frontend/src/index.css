@@ -124,7 +124,7 @@
     margin: 0 !important;
     background-color: white !important;
   }
-  aside, header, button, .no-print, .toast-container, .sidebar, .topbar {
+  aside, header, .no-print, .toast-container, .sidebar, .topbar {
     display: none !important;
   }
   main, .flex-1, .p-8 {
@@ -133,4 +133,15 @@
     overflow: visible !important;
     height: auto !important;
   }
+}
+
+@keyframes tada {
+  0% { transform: scale(1); }
+  10%, 20% { transform: scale(0.9) rotate(-3deg); }
+  30%, 50%, 70%, 90% { transform: scale(1.1) rotate(3deg); }
+  40%, 60%, 80% { transform: scale(1.1) rotate(-3deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.animate-tada {
+  animation: tada 1s ease-in-out infinite;
 }

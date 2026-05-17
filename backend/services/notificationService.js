@@ -1,29 +1,68 @@
 const nodemailer = require('nodemailer');
 const logger = require('../utils/winstonLogger');
 
+const platformSettingsService = require('./platformSettingsService');
+
 /**
  * Notification Service
- * Handles Email and SMS (Mock) delivery across the platform.
+ * Handles Email and SMS delivery across the platform using dynamic configuration.
  */
 class NotificationService {
     constructor() {
-        this.transporter = nodemailer.createTransport({
-            host: process.env.EMAIL_HOST || 'smtp.mailtrap.io',
-            port: process.env.EMAIL_PORT || 2525,
-            auth: {
-                user: process.env.EMAIL_USER || '',
-                pass: process.env.EMAIL_PASS || ''
-            }
-        });
+        this.transporter = null;
+        this.initialized = false;
+    }
+
+    async init() {
+        if (this.initialized) return;
+        await this.setupTransporter();
+        this.initialized = true;
+        console.log('>>> Notification Service Initialized');
+    }
+
+    async refresh() {
+        await this.setupTransporter();
+        console.log('>>> Notification Service Transporter Refreshed');
+    }
+
+    async setupTransporter() {
+        const provider = platformSettingsService.get('email_provider', 'smtp');
+        
+        if (provider === 'smtp') {
+            this.transporter = nodemailer.createTransport({
+                host: platformSettingsService.get('email_host') || process.env.EMAIL_HOST || 'smtp.mailtrap.io',
+                port: platformSettingsService.getInt('email_port') || process.env.EMAIL_PORT || 2525,
+                auth: {
+                    user: platformSettingsService.get('email_user') || process.env.EMAIL_USER || '',
+                    pass: platformSettingsService.get('email_pass') || process.env.EMAIL_PASS || ''
+                }
+            });
+        } else {
+            // Placeholder for other providers (SendGrid, AWS SES)
+            // For now fallback to SMTP as base
+            this.transporter = nodemailer.createTransport({
+                host: process.env.EMAIL_HOST,
+                port: process.env.EMAIL_PORT,
+                auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS
+                }
+            });
+        }
     }
 
     /**
      * Send Generic Email
      */
     async sendEmail({ to, subject, html, text }) {
+        if (!this.transporter) await this.setupTransporter();
+        
+        const senderName = platformSettingsService.get('sender_name', 'RestoLedger');
+        const senderEmail = platformSettingsService.get('sender_email', 'no-reply@restoledger.com');
+
         try {
             const info = await this.transporter.sendMail({
-                from: `"RestoLedger Security" <${process.env.EMAIL_FROM || 'no-reply@restoledger.com'}>`,
+                from: `"${senderName}" <${senderEmail}>`,
                 to,
                 subject,
                 text,

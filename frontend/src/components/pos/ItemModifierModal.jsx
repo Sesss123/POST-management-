@@ -22,6 +22,7 @@ import { modifierApi } from '../../api/api';
 import { cn } from '../../utils/cn';
 
 const ItemModifierModal = ({ isOpen, onClose, item, onConfirm, initialData = null }) => {
+  if (!isOpen || !item) return null;
   const toast = useToast();
   const [modifiers, setModifiers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -76,12 +77,32 @@ const ItemModifierModal = ({ isOpen, onClose, item, onConfirm, initialData = nul
     return (basePrice + modTotal) * qty;
   };
 
-  const modifierGroups = {
-    add_on: modifiers.filter(m => m.type === 'add_on'),
-    remove: modifiers.filter(m => m.type === 'remove'),
-    preference: modifiers.filter(m => m.type === 'preference'),
-    serving: modifiers.filter(m => m.type === 'serving')
-  };
+  const filteredModifiers = modifiers.filter(m => {
+    if (!item) return false;
+    const isRetailOrBeverage = ['beverage', 'retail', 'restricted_retail'].includes(item.item_type);
+    
+    // If it's a beverage or retail item, we should be very strict.
+    // Only show if the modifier category matches the item category exactly.
+    if (isRetailOrBeverage) {
+      return m.category === item.category;
+    }
+
+    // For other items (food, etc.), show global modifiers AND category matches.
+    if (!m.category || m.category === 'All' || m.category === 'Global' || m.category === '') return true;
+    return m.category === item.category;
+  });
+
+  const modifierGroups = filteredModifiers.reduce((acc, mod) => {
+    // If user has set a specific category like "Extra Options", use that.
+    // Otherwise fall back to the type (add-on, remove, etc)
+    const groupName = (mod.category && mod.category !== 'All' && mod.category !== 'Global' && mod.category !== '')
+      ? mod.category 
+      : mod.type.replace('_', ' ');
+    
+    if (!acc[groupName]) acc[groupName] = [];
+    acc[groupName].push(mod);
+    return acc;
+  }, {});
 
   const handleConfirm = () => {
     onConfirm({
@@ -105,9 +126,9 @@ const ItemModifierModal = ({ isOpen, onClose, item, onConfirm, initialData = nul
       icon={ChefHat}
       size="lg"
     >
-      <div className="space-y-8">
+      <div className="space-y-6">
         {/* Item Summary Card */}
-        <div className="p-6 bg-slate-900 rounded-[32px] text-white flex justify-between items-center shadow-xl shadow-slate-200">
+        <div className="p-4 sm:p-6 bg-slate-900 rounded-[24px] sm:rounded-[32px] text-white flex justify-between items-center shadow-xl shadow-slate-200">
            <div>
               <h4 className="text-xl font-black tracking-tight">{item.name}</h4>
               <p className="text-indigo-400 font-bold text-xs uppercase tracking-widest">Base Price: Rs. {item.price}</p>
@@ -129,9 +150,9 @@ const ItemModifierModal = ({ isOpen, onClose, item, onConfirm, initialData = nul
            </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
            {/* Left: Modifiers */}
-           <div className="space-y-6 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+           <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
               {Object.entries(modifierGroups).map(([type, group]) => (
                 <div key={type} className="space-y-3">
                    <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 px-2">{type.replace('_', ' ')}s</h5>

@@ -1,0 +1,7 @@
+2026-05-12 09:00:00 [ERROR]: Error: Unknown column 's.subscription_expiry' in 'field list'
+    at SubscriptionReminderService.processReminders (C:\Users\sehas\.gemini\antigravity\scratch\Anju ayya\RestoLedger-POS\backend\services\subscriptionReminderService.js:37:38)
+    at C:\Users\sehas\.gemini\antigravity\scratch\Anju ayya\RestoLedger-POS\backend\services\subscriptionReminderService.js:14:18
+    at Runner.onMatch (C:\Users\sehas\.gemini\antigravity\scratch\Anju ayya\RestoLedger-POS\backend\node_modules\node-cron\dist\cjs\tasks\inline-scheduled-task.js:69:20)
+    at Timeout._onTimeout (C:\Users\sehas\.gemini\antigravity\scratch\Anju ayya\RestoLedger-POS\backend\node_modules\node-cron\dist\cjs\scheduler\runner.js:70:55)
+    at listOnTimeout (node:internal/timers:594:17)
+    at process.processTimers (node:internal/timers:529:7)

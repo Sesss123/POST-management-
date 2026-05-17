@@ -17,10 +17,22 @@ exports.holdBill = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // 1. Generate Hold Number: HOLD-YYYYMMDD-0001
+        // 1. Generate Hold Number: HOLD-YYYYMMDD-0001 (Sequential per day)
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const [[{ count }]] = await connection.query('SELECT COUNT(*) as count FROM held_bills WHERE DATE(created_at) = CURDATE() AND shop_id = ?', [req.shopId]);
-        const holdNo = `HOLD-${today}-${(count + 1).toString().padStart(4, '0')}`;
+        const [lastBill] = await connection.query(
+            'SELECT hold_no FROM held_bills WHERE hold_no LIKE ? AND shop_id = ? ORDER BY id DESC LIMIT 1', 
+            [`HOLD-${today}-%`, req.shopId]
+        );
+        
+        let nextNumber = 1;
+        if (lastBill.length > 0) {
+            const lastNo = lastBill[0].hold_no;
+            const parts = lastNo.split('-');
+            const lastSeq = parseInt(parts[parts.length - 1]);
+            nextNumber = lastSeq + 1;
+        }
+        
+        const holdNo = `HOLD-${today}-${nextNumber.toString().padStart(4, '0')}`;
 
         // 2. Validate Items and Calculate Totals (Backend Security)
         let calculatedSubtotal = 0;
@@ -154,7 +166,12 @@ exports.getHeldBills = async (req, res) => {
     const { status = 'held', search } = req.query;
     
     try {
-        let sql = "SELECT h.*, u.name as created_by_name FROM held_bills h LEFT JOIN users u ON h.created_by = u.id WHERE h.shop_id = ?";
+        let sql = `
+            SELECT h.*, u.name as created_by_name,
+            (SELECT GROUP_CONCAT(CONCAT(qty, 'x ', item_name) SEPARATOR ', ') FROM held_bill_items WHERE held_bill_id = h.id) as item_summary
+            FROM held_bills h 
+            LEFT JOIN users u ON h.created_by = u.id 
+            WHERE h.shop_id = ?`;
         const params = [req.shopId];
 
         if (status && status !== 'all') {

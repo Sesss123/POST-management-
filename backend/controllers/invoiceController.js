@@ -231,17 +231,8 @@ exports.createCashSale = async (req, res) => {
         const promotion_discount_amount = await calculatePromotionDiscount(connection, promotion_id, discountedSubtotal, req.shopId);
         let finalSubtotal = Math.max(0, discountedSubtotal - promotion_discount_amount);
 
-        // 2.2 Loyalty Redemption
+        // 2.2 Loyalty Redemption (Decommissioned)
         let loyalty_discount_amount = 0;
-        if (customer_id && loyalty_points_redeem > 0) {
-            const loyaltyResult = await loyaltyService.redeemPoints(connection, {
-                customerId: customer_id,
-                points: parseFloat(loyalty_points_redeem),
-                userId: req.user.id,
-                shopId: req.shopId
-            });
-            loyalty_discount_amount = loyaltyResult.discountValue;
-        }
 
         // 3. Calculate Totals using Centralized Pricing Calculator
         const totals = calculateInvoiceTotals({
@@ -344,18 +335,7 @@ exports.createCashSale = async (req, res) => {
         // 5.2 Deduct Stock
         await deductStock(connection, processedItems, invoiceId, req.shopId, req.user.id);
 
-        // 5.3 Loyalty Points Earning (Only if paid and not training)
-        if (customer_id && settings.is_training_mode !== 'true') {
-            await loyaltyService.addPoints(connection, {
-                customerId: customer_id,
-                invoiceId: invoiceId,
-                amount: grand_total,
-                type: 'earn',
-                description: `Earned from invoice ${invoice_no}`,
-                userId: req.user.id,
-                shopId: req.shopId
-            });
-        }
+        // 5.3 Loyalty Points Earning (Decommissioned)
 
         // 6. Log Action
         await logAction(req.user.id, 'cash_sale_created', 'invoice', invoiceId, null, { invoice_no, grand_total });
@@ -373,12 +353,11 @@ exports.createCashSale = async (req, res) => {
         const [invoiceItems] = await connection.query('SELECT * FROM invoice_items WHERE invoice_id = ? AND shop_id = ?', [invoiceId, req.shopId]);
         fullInvoice.items = invoiceItems;
 
-        // Get settings too
-        const [settingsRows] = await connection.query('SELECT * FROM settings WHERE shop_id = ?', [req.shopId]);
-        fullInvoice.settings = settingsRows.reduce((acc, s) => {
-            acc[s.setting_key] = s.setting_value;
-            return acc;
-        }, {});
+        // Attach settings and explicit receipt fields to response
+        fullInvoice.settings = settings;
+        fullInvoice.receipt_restaurant_name = settings.restaurant_name || settings.shop_name;
+        fullInvoice.receipt_restaurant_address = settings.restaurant_address || settings.shop_address;
+        fullInvoice.receipt_restaurant_phone = settings.restaurant_phone || settings.shop_phone;
 
         await connection.commit();
         res.status(201).json({ 
@@ -605,10 +584,14 @@ exports.createTableCheckout = async (req, res) => {
         fullInvoice.items = invoiceItems;
 
         const [settingsRows] = await connection.query('SELECT * FROM settings WHERE shop_id = ?', [req.shopId]);
-        fullInvoice.settings = settingsRows.reduce((acc, s) => {
+        const settingsObj = settingsRows.reduce((acc, s) => {
             acc[s.setting_key] = s.setting_value;
             return acc;
         }, {});
+        fullInvoice.settings = settingsObj;
+        fullInvoice.receipt_restaurant_name = fullInvoice.receipt_restaurant_name || settingsObj.restaurant_name || settingsObj.shop_name;
+        fullInvoice.receipt_restaurant_address = fullInvoice.receipt_restaurant_address || settingsObj.restaurant_address || settingsObj.shop_address;
+        fullInvoice.receipt_restaurant_phone = fullInvoice.receipt_restaurant_phone || settingsObj.restaurant_phone || settingsObj.shop_phone;
 
         await connection.commit();
         res.status(201).json({ success: true, message: 'Checkout completed', data: fullInvoice });
@@ -627,17 +610,30 @@ exports.createTableCheckout = async (req, res) => {
 // @access  Private
 exports.getInvoices = async (req, res) => {
     try {
-        const query = `
+        const { sale_channel, sale_type } = req.query;
+        let query = `
             SELECT i.*, c.name as customer_name, t.table_no, u.name as created_by_name
             FROM invoices i
             LEFT JOIN customers c ON i.customer_id = c.id
             LEFT JOIN restaurant_tables t ON i.table_id = t.id
             LEFT JOIN users u ON i.created_by = u.id
             WHERE i.shop_id = ?
-            ORDER BY i.created_at DESC
-            LIMIT 100
         `;
-        const [invoices] = await db.query(query, [req.shopId]);
+        const params = [req.shopId];
+
+        if (sale_channel) {
+            query += " AND i.sale_channel = ?";
+            params.push(sale_channel);
+        }
+
+        if (sale_type) {
+            query += " AND i.sale_type = ?";
+            params.push(sale_type);
+        }
+
+        query += " ORDER BY i.created_at DESC LIMIT 100";
+        
+        const [invoices] = await db.query(query, params);
         res.json({ success: true, data: invoices });
     } catch (error) {
         console.error(error);
@@ -680,10 +676,15 @@ exports.getInvoiceDetails = async (req, res) => {
 
         // Add restaurant settings for printing
         const [settingsRows] = await db.query('SELECT * FROM settings WHERE shop_id = ?', [req.shopId]);
-        invoice.settings = settingsRows.reduce((acc, s) => {
+        const settings = settingsRows.reduce((acc, s) => {
             acc[s.setting_key] = s.setting_value;
             return acc;
         }, {});
+        invoice.settings = settings;
+        // Explicit branding fields (fallback from stored values or live settings)
+        invoice.receipt_restaurant_name = invoice.receipt_restaurant_name || settings.restaurant_name || settings.shop_name;
+        invoice.receipt_restaurant_address = invoice.receipt_restaurant_address || settings.restaurant_address || settings.shop_address;
+        invoice.receipt_restaurant_phone = invoice.receipt_restaurant_phone || settings.restaurant_phone || settings.shop_phone;
         
         res.json({ success: true, data: invoice });
     } catch (error) {
@@ -1270,6 +1271,7 @@ exports.createQuickSale = async (req, res) => {
             await logAction(req.user.id, 'restricted_item_sold', 'invoice', invoiceId, null, { invoice_no });
         }
 
+        // Attach settings and explicit receipt fields to response (settings already available from earlier in the function)
         await connection.commit();
         res.status(201).json({ 
             success: true, 
@@ -1280,8 +1282,13 @@ exports.createQuickSale = async (req, res) => {
                 grand_total: grand_total,
                 cash_received: finalCashReceived,
                 change_amount: changeAmount,
-                no_receipt: true
-            }
+                no_receipt: true,
+                settings: settings,
+                receipt_restaurant_name: settings.restaurant_name || settings.shop_name,
+                receipt_restaurant_address: settings.restaurant_address || settings.shop_address,
+                receipt_restaurant_phone: settings.restaurant_phone || settings.shop_phone,
+                items: processedItems
+            } 
         });
 
     } catch (error) {

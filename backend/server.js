@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { connectDB } = require('./config/db');
@@ -30,10 +31,12 @@ const publicMenuRoutes = require('./routes/publicMenuRoutes');
 const announcementRoutes = require('./routes/announcementRoutes');
 const supportTicketRoutes = require('./routes/supportTicketRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
+const offlineSyncRoutes = require('./routes/offlineSyncRoutes');
 const backupScheduler = require('./services/backupScheduler');
 const tenantMiddleware = require('./middleware/tenantMiddleware');
 const { subscriptionMiddleware } = require('./middleware/subscriptionMiddleware');
 const superAdminRoutes = require('./routes/superAdminRoutes');
+const socketService = require('./services/socketService');
 const { protect } = require('./middleware/authMiddleware');
 const idempotency = require('./middleware/idempotencyMiddleware');
 const { 
@@ -43,6 +46,7 @@ const {
     paymentStatusLimiter, 
     superAdminLimiter 
 } = require('./middleware/rateLimitMiddleware');
+const maintenanceMiddleware = require('./middleware/maintenanceMiddleware');
 
 dotenv.config();
 
@@ -71,6 +75,12 @@ connectDB();
 
 const securitySettingsService = require('./services/securitySettingsService');
 securitySettingsService.init();
+
+const platformSettingsService = require('./services/platformSettingsService');
+platformSettingsService.init();
+
+const notificationService = require('./services/notificationService');
+notificationService.init();
 
 const app = express();
 app.set('trust proxy', 1);
@@ -128,12 +138,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/public-menu', publicMenuRoutes);
 
 // Helper: standard middleware chain for all shop-scoped routes
-const shopMiddleware = [protect, tenantMiddleware, subscriptionMiddleware, idempotency];
+const shopMiddleware = [protect, maintenanceMiddleware, tenantMiddleware, subscriptionMiddleware, idempotency];
 
 app.use('/api/items',          ...shopMiddleware, itemRoutes);
 app.use('/api/customers',      ...shopMiddleware, customerRoutes);
 app.use('/api/invoices',       ...shopMiddleware, invoiceRoutes);
 app.use('/api/tables',         ...shopMiddleware, tableRoutes);
+app.use('/api/payments/gateway', ...shopMiddleware, gatewayPaymentRoutes);
 app.use('/api/payments',       ...shopMiddleware, paymentRoutes);
 app.use('/api/reports',        ...shopMiddleware, reportRoutes);
 app.use('/api/users',          ...shopMiddleware, userRoutes);
@@ -155,10 +166,10 @@ app.use('/api/delivery-orders', ...shopMiddleware, require('./routes/deliveryRou
 app.use('/api/marketing',      ...shopMiddleware, require('./routes/marketingRoutes'));
 app.use('/api/stock',          ...shopMiddleware, require('./routes/stockRoutes'));
 app.use('/api/backups',        ...shopMiddleware, backupRoutes);
-app.use('/api/payments/gateway', ...shopMiddleware, gatewayPaymentRoutes);
 app.use('/api/announcements', ...shopMiddleware, announcementRoutes);
 app.use('/api/support/tickets', ...shopMiddleware, supportTicketRoutes);
 app.use('/api/expenses',       ...shopMiddleware, expenseRoutes);
+app.use('/api/offline-sync',   ...shopMiddleware, offlineSyncRoutes);
 app.use('/api/super-admin',    superAdminRoutes);
 
 // Base route
@@ -183,7 +194,10 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+socketService.init(server);
+
+server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     // Start automated tasks
     backupScheduler.start();

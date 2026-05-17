@@ -10,7 +10,8 @@ const {
     updateStatus, 
     updateUsability,
     deleteItem,
-    receiveStock
+    receiveStock,
+    syncPopularItems
 } = require('../controllers/itemController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -18,6 +19,7 @@ router.use(protect);
 
 router.get('/', getItems);
 router.get('/categories', getCategories);
+router.post('/sync-popular', authorize('admin'), syncPopularItems);
 
 router.post('/', authorize('admin'), createItem);
 router.put('/:id', authorize('admin'), updateItem);

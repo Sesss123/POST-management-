@@ -26,7 +26,7 @@ router.post('/cash-sale/add-to-credit', createCashSaleCredit);
 router.post('/table-sale/pay-now', createTableCheckout);
 router.post('/table-sale/add-to-credit', createTableCheckout);
 router.post('/table-sale/split', splitBill);
-router.patch('/:id/cancel', authorize('admin'), cancelInvoice);
-router.delete('/:id/void', authorize('admin'), voidInvoice);
+router.patch('/:id/cancel', authorize('admin', 'manager', 'cashier'), cancelInvoice);
+router.delete('/:id/void', authorize('admin', 'manager', 'cashier'), voidInvoice);
 
 module.exports = router;

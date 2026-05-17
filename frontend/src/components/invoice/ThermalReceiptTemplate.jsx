@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '../../utils/cn';
 
 const ThermalReceiptTemplate = ({ invoice }) => {
+  console.log('ThermalReceiptTemplate Data:', invoice);
   if (!invoice) return null;
 
   const {
@@ -10,7 +11,6 @@ const ThermalReceiptTemplate = ({ invoice }) => {
     created_by_name,
     customer_name,
     table_no,
-    items,
     subtotal,
     discount,
     tax_amount,
@@ -31,6 +31,8 @@ const ThermalReceiptTemplate = ({ invoice }) => {
     settings
   } = invoice;
 
+  const items = invoice.items || invoice.invoice_items || [];
+
   const parseNum = (val) => {
     const n = parseFloat(val);
     return isNaN(n) ? 0 : n;
@@ -41,13 +43,16 @@ const ThermalReceiptTemplate = ({ invoice }) => {
   const dateStr = created_at ? new Date(created_at).toLocaleDateString() : new Date().toLocaleDateString();
   const timeStr = created_at ? new Date(created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+  // Safe items check
+  const safeItems = Array.isArray(items) ? items : [];
+
   return (
     <div className="thermal-receipt-template bg-white text-black font-mono p-2 w-[80mm] mx-auto shadow-sm text-center">
       {/* Header */}
       <div className="mb-4">
-        <h1 className="text-xl font-black uppercase mb-1 tracking-tight">{settings?.restaurant_name || 'RESTOLEDGER POS'}</h1>
-        <p className="text-[10px] leading-tight mb-0.5">{settings?.restaurant_address || '123 POS Street, City'}</p>
-        <p className="text-[10px]">TEL: {settings?.restaurant_phone || '0112345678'}</p>
+        <h1 className="text-xl font-black uppercase mb-1 tracking-tight">{invoice.receipt_restaurant_name || settings?.restaurant_name || 'RESTOLEDGER POS'}</h1>
+        <p className="text-[10px] leading-tight mb-0.5">{invoice.receipt_restaurant_address || settings?.restaurant_address || 'Address Not Set'}</p>
+        <p className="text-[10px]">TEL: {invoice.receipt_restaurant_phone || settings?.restaurant_phone || 'N/A'}</p>
         {payment_method === 'credit' && (
           <div className="mt-2 py-1 border-2 border-black font-black text-sm uppercase">
             *** CREDIT SALE ***
@@ -58,7 +63,7 @@ const ThermalReceiptTemplate = ({ invoice }) => {
       <div className="border-t border-black border-dashed my-2"></div>
 
       {/* Basic Info */}
-      <div className="text-[10px] space-y-0.5 text-left mb-2">
+      <div className="text-[12px] space-y-0.5 text-left mb-2">
         <div className="flex justify-between">
           <span className="font-bold">BILL NO: {invoice_no || 'N/A'}</span>
           <span>{dateStr}</span>
@@ -82,38 +87,48 @@ const ThermalReceiptTemplate = ({ invoice }) => {
 
       <div className="border-t border-black border-dashed my-2"></div>
 
-      {/* Items */}
-      <table className="w-full text-[10px] mb-2">
-        <thead>
-          <tr className="border-b border-black font-bold">
-            <th className="text-left py-1">ITEM</th>
-            <th className="text-center py-1">QTY</th>
-            <th className="text-right py-1">PRICE</th>
-            <th className="text-right py-1">TOTAL</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-black divide-dotted">
-          {items && items.length > 0 ? items.map((item, idx) => (
-            <tr key={idx} className="align-top">
-              <td className="py-1 uppercase text-left pr-1 leading-tight">
-                {item.item_name}
-              </td>
-              <td className="text-center py-1">{item.qty}</td>
-              <td className="text-right py-1">{parseNum(item.unit_price).toFixed(0)}</td>
-              <td className="text-right py-1 font-bold">{parseNum(item.total).toFixed(0)}</td>
-            </tr>
+      {/* Items List */}
+      <div className="w-full text-[12px] mb-2">
+        <div className="flex justify-between border-b border-black font-bold py-1 uppercase text-[10px] tracking-widest">
+          <span className="w-1/2 text-left">Item</span>
+          <span className="w-1/6 text-center">Qty</span>
+          <span className="w-1/3 text-right">Total</span>
+        </div>
+        <div className="divide-y divide-black divide-dotted">
+          {safeItems.length > 0 ? safeItems.map((item, idx) => (
+            <div key={idx} className="py-2">
+              <div className="flex justify-between items-start gap-1">
+                <span className="w-1/2 text-left uppercase leading-tight font-bold">
+                  {item.item_name}
+                  {item.modifier_names && (
+                    <div className="text-[9px] font-normal normal-case italic opacity-80 leading-none mt-0.5">
+                      {item.modifier_names}
+                    </div>
+                  )}
+                  {item.special_note && (
+                    <div className="text-[9px] font-normal italic opacity-70 leading-none mt-0.5">
+                      Note: {item.special_note}
+                    </div>
+                  )}
+                </span>
+                <span className="w-1/6 text-center">{item.qty}</span>
+                <span className="w-1/3 text-right font-black">
+                  {parseNum(item.total).toFixed(0)}
+                </span>
+              </div>
+            </div>
           )) : (
-            <tr>
-              <td colSpan="4" className="py-4 text-center italic">No items found</td>
-            </tr>
+            <div className="py-8 text-center italic font-bold bg-slate-50 border-2 border-dashed border-slate-200">
+              [DATA ERROR: NO ITEMS FOUND]
+            </div>
           )}
-        </tbody>
-      </table>
+        </div>
+      </div>
 
       <div className="border-t border-black border-dashed my-2"></div>
 
       {/* Totals */}
-      <div className="text-[11px] space-y-1 text-left">
+      <div className="text-[12px] space-y-1 text-left">
         <div className="flex justify-between">
           <span>SUBTOTAL:</span>
           <span>{parseNum(subtotal).toFixed(2)}</span>
@@ -195,16 +210,29 @@ const ThermalReceiptTemplate = ({ invoice }) => {
         @media print {
           .thermal-receipt-template {
             width: 80mm !important;
+            min-height: 100mm !important;
             margin: 0 !important;
-            padding: 5mm !important;
+            padding: 2mm !important;
             box-shadow: none !important;
+            background: white !important;
+            color: black !important;
+            text-align: center !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
           }
           @page {
             size: 80mm auto;
             margin: 0;
           }
+          body {
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
         }
       `}} />
+      <div className="hidden">Print-Debug: Items={safeItems.length}, Settings={!!settings}</div>
     </div>
   );
 };

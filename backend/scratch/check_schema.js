@@ -2,21 +2,13 @@ const { db } = require('../config/db');
 
 async function checkSchema() {
     try {
-        const tables = ['subscription_plans', 'subscription_payments', 'subscription_logs', 'shops', 'audit_logs'];
-        for (const table of tables) {
-            console.log(`--- ${table} ---`);
-            try {
-                const [cols] = await db.query(`DESCRIBE ${table}`);
-                console.table(cols);
-            } catch (e) {
-                console.error(`Table ${table} MISSING`);
-            }
-        }
-
-        process.exit(0);
-    } catch (err) {
-        console.error(err);
-        process.exit(1);
+        const [columns] = await db.query('DESCRIBE reservations');
+        console.log('Columns in reservations table:');
+        columns.forEach(col => console.log(`- ${col.Field}`));
+    } catch (error) {
+        console.error('Error checking schema:', error);
+    } finally {
+        process.exit();
     }
 }
 

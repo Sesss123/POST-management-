@@ -128,19 +128,6 @@ exports.allocatePaymentOldestFirst = async (connection, { customerId, paymentId,
             [paymentId, inv.id, amountToApply]
         );
 
-        // Loyalty Points Earning (Only if now fully paid)
-        if (newStatus === 'paid') {
-            // We earn points based on the grand_total of the invoice
-            await loyaltyService.addPoints(connection, {
-                customerId,
-                invoiceId: inv.id,
-                amount: inv.grand_total,
-                type: 'earn',
-                description: `Earned from settled credit invoice ${inv.invoice_no}`,
-                shopId: inv.shop_id
-            });
-        }
-
         remainingToAllocate -= amountToApply;
     }
 };

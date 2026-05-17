@@ -1,6 +1,7 @@
 const { db } = require('../config/db');
 const { logAction } = require('../utils/logger');
 const { buildIdOrUuidWhere } = require('../utils/identifier');
+const socketService = require('../services/socketService');
 
 // @desc    Get all active KOTs for kitchen display
 // @route   GET /api/kitchen/kots
@@ -149,6 +150,7 @@ exports.updateKotStatus = async (req, res) => {
         });
 
         await connection.commit();
+        socketService.emitToShop(req.shopId, 'kot_status_updated', { kot_id: kotId, status });
         res.json({ success: true, message: `KOT ${kot_no} updated to ${status}` });
     } catch (error) {
         await connection.rollback();
@@ -203,6 +205,7 @@ exports.cancelKot = async (req, res) => {
         });
 
         await connection.commit();
+        socketService.emitToShop(req.shopId, 'kot_status_updated', { kot_id: kotId, status: 'cancelled' });
         res.json({ success: true, message: 'KOT cancelled successfully' });
     } catch (error) {
         await connection.rollback();
@@ -229,6 +232,7 @@ exports.updateItemStatus = async (req, res) => {
             SET ki.status = ? 
             WHERE ${where.query} AND ko.shop_id = ?
         `, [status, where.value, req.shopId]);
+        socketService.emitToShop(req.shopId, 'kot_status_updated', { item_id: identifier, status });
         res.json({ success: true, message: 'Item status updated' });
     } catch (error) {
         console.error('Update Item Status Error:', error);

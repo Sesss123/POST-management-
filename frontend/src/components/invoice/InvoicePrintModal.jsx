@@ -14,14 +14,19 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
   const [sendingKOT, setSendingKOT] = useState(false);
   const toast = useToast();
 
-  React.useEffect(() => {
-    if (isOpen && autoPrint && invoice) {
-      const timer = setTimeout(() => {
-        // window.print();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, autoPrint, invoice]);
+  // Auto-print effect disabled as per user preference
+  // React.useEffect(() => {
+  //   if (isOpen && autoPrint && invoice) {
+  //     const timer = setTimeout(() => {
+  //       if (isOpen) {
+  //           window.print();
+  //       }
+  //     }, 1000);
+  //     return () => {
+  //       clearTimeout(timer);
+  //     };
+  //   }
+  // }, [isOpen, autoPrint, invoice]);
 
   if (!invoice) return null;
 
@@ -66,11 +71,11 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
         isOpen={isOpen}
         onClose={onClose}
         title="Invoice Details"
-        size="lg"
+        size="xl"
     >
-      <div className="space-y-6">
-        {/* Actions Bar (Top) */}
-        <div className="no-print flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50 p-4 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="space-y-4">
+        {/* Actions Bar - Always Visible (not hidden during print) */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100 shadow-sm no-print">
             <div className="flex bg-slate-200/50 p-1 rounded-xl border border-slate-200">
                 <button
                     onClick={() => setPrintMode('thermal')}
@@ -128,7 +133,7 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
         </div>
 
         {/* Preview Area */}
-        <div className="no-print flex justify-center bg-slate-50 p-6 rounded-[32px] border-2 border-dashed border-slate-200 items-start overflow-x-auto custom-scrollbar min-h-[500px]">
+        <div className="flex justify-center bg-slate-50 p-6 rounded-[32px] border-2 border-dashed border-slate-200 items-start overflow-x-auto custom-scrollbar min-h-[500px] print:hidden">
             <div className={cn(
                 "bg-white shadow-2xl transition-all duration-300",
                 printMode === 'thermal' ? "w-[80mm]" : "w-full max-w-[210mm]"
@@ -141,45 +146,68 @@ const InvoicePrintModal = ({ isOpen, onClose, invoice, onRestore, autoPrint = tr
             </div>
         </div>
 
-        {/* Actual Print Content (Visible only during print) */}
-        <div className="print-only fixed inset-0 z-[99999] bg-white overflow-visible">
-            {printMode === 'thermal' ? (
-                <ThermalReceiptTemplate invoice={invoice} />
-            ) : (
-                <div className="bg-white min-h-screen">
-                    <A4InvoiceTemplate invoice={invoice} />
-                </div>
-            )}
+        <div className="flex gap-4 pt-6 border-t border-slate-100 no-print">
+            <AppButton 
+                variant="secondary" 
+                className="flex-1 py-4 rounded-2xl font-black uppercase tracking-widest" 
+                onClick={onClose}
+            >
+                Close
+            </AppButton>
+            <AppButton 
+                variant="success" 
+                className="flex-[2] py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-emerald-200" 
+                icon={Printer}
+                onClick={handlePrint}
+                disabled={voiding || sendingKOT}
+            >
+                Print Invoice
+            </AppButton>
         </div>
 
         <style dangerouslySetInnerHTML={{ __html: `
-            .print-only {
-                display: none !important;
-            }
             @media print {
-            .no-print, .modal-backdrop, .modal-container, header, nav, aside {
-                display: none !important;
-            }
-            .print-only {
+              /* Hide everything by default */
+              body * {
+                visibility: hidden !important;
+              }
+              
+              /* Only show our print container and its children */
+              .print-only, .print-only * {
+                visibility: visible !important;
+              }
+
+              .print-only {
                 display: block !important;
                 position: absolute !important;
                 left: 0 !important;
                 top: 0 !important;
-                width: 100% !important;
+                width: ${printMode === 'thermal' ? '80mm' : '100%'} !important;
                 margin: 0 !important;
                 padding: 0 !important;
-            }
-            body {
-                visibility: hidden;
                 background: white !important;
-            }
-            .print-only, .print-only * {
-                visibility: visible;
-            }
-            @page {
+              }
+
+              /* Hide action buttons and controls */
+              .no-print {
+                display: none !important;
+              }
+
+              /* Reset body for print */
+              body {
+                background: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                display: block !important;
+                height: auto !important;
+                overflow: visible !important;
+              }
+
+              @page {
                 margin: 0;
                 size: ${printMode === 'thermal' ? '80mm auto' : 'A4'};
-            }
+                orientation: portrait;
+              }
             }
         `}} />
       </div>

@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import apiClient from '../api/apiClient';
+import { initSocket, disconnectSocket } from '../api/socket';
 
 const AuthContext = createContext();
 
@@ -26,6 +27,7 @@ export const AuthProvider = ({ children }) => {
           if (data.success) {
             setUser(data.data);
             localStorage.setItem('user', JSON.stringify(data.data));
+            initSocket(data.data.shop_id);
           }
         } catch (error) {
           logout();
@@ -44,6 +46,7 @@ export const AuthProvider = ({ children }) => {
         setUser(data.data);
         localStorage.setItem('token', data.data.token);
         localStorage.setItem('user', JSON.stringify(data.data));
+        initSocket(data.data.shop_id);
       }
       return data;
     } catch (error) {
@@ -58,6 +61,7 @@ export const AuthProvider = ({ children }) => {
         setUser(data.data);
         localStorage.setItem('token', data.data.token);
         localStorage.setItem('user', JSON.stringify(data.data));
+        initSocket(data.data.shop_id);
       }
       return data;
     } catch (error) {
@@ -69,6 +73,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    disconnectSocket();
   };
 
   const forgotPassword = async (email) => {

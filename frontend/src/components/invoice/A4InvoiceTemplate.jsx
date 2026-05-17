@@ -33,6 +33,9 @@ const A4InvoiceTemplate = ({ invoice }) => {
 
   const currency = currency_symbol || settings?.currency_symbol || 'Rs.';
   const taxName = tax_name || settings?.tax_name || 'Tax';
+  const dateStr = created_at ? new Date(created_at).toLocaleDateString() : new Date().toLocaleDateString();
+  const timeStr = created_at ? new Date(created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const safeItems = Array.isArray(items) ? items : (Array.isArray(invoice.invoice_items) ? invoice.invoice_items : []);
 
   return (
     <div className="a4-invoice-template bg-white text-slate-900 font-sans p-8 max-w-[210mm] mx-auto min-h-[297mm] shadow-lg">
@@ -71,7 +74,7 @@ const A4InvoiceTemplate = ({ invoice }) => {
           <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Date & Time</h4>
           <p className="font-bold text-sm flex items-center gap-2">
             <Calendar size={14} className="text-slate-400" />
-            {new Date(created_at).toLocaleString()}
+            {dateStr} {timeStr}
           </p>
         </div>
         <div>
@@ -131,7 +134,7 @@ const A4InvoiceTemplate = ({ invoice }) => {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {items && items.map((item, idx) => (
+          {safeItems.length > 0 ? safeItems.map((item, idx) => (
             <tr key={idx}>
               <td className="py-5">
                 <p className="font-bold text-slate-900">{item.item_name}</p>
@@ -140,7 +143,13 @@ const A4InvoiceTemplate = ({ invoice }) => {
               <td className="py-5 text-right font-medium text-slate-600">{currency} {parseFloat(item.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
               <td className="py-5 text-right font-bold text-slate-900">{currency} {parseFloat(item.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
             </tr>
-          ))}
+          )) : (
+            <tr>
+                <td colSpan="4" className="py-8 text-center italic font-bold text-slate-400">
+                    [DATA ERROR: NO ITEMS FOUND]
+                </td>
+            </tr>
+          )}
         </tbody>
       </table>
 

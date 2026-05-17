@@ -7,20 +7,32 @@ import {
   Bell,
   Clock,
   ChevronDown,
-  X
+  X,
+  WifiOff
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import SubscriptionBanner from '../subscription/SubscriptionBanner';
 import LockedScreen from '../subscription/LockedScreen';
 import LanguageSwitcher from '../common/LanguageSwitcher';
+import NotificationDropdown from '../common/NotificationDropdown';
+import UserMenu from './UserMenu';
 import { cn } from '../../utils/cn';
+import { useNetwork } from '../../hooks/useNetwork';
 
 const DashboardLayout = () => {
   const { user } = useAuth();
   const { isLocked } = useSubscription();
   const location = useLocation();
+  const isOnline = useNetwork();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [currentTime, setCurrentTime] = React.useState(new Date());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Map route to title (fallback to current Sidebar logic if needed)
   const getPageTitle = () => {
@@ -63,40 +75,45 @@ const DashboardLayout = () => {
           </div>
 
           <div className="flex items-center gap-3 lg:gap-6">
-            <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl text-slate-400">
-                <Clock size={16} />
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
-                    {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </span>
+            <div className="hidden sm:flex items-center gap-3 px-5 py-2.5 bg-slate-900 rounded-2xl text-white shadow-lg shadow-slate-900/20 border border-white/10 group transition-all hover:scale-105">
+                <Clock size={16} className="text-indigo-400 animate-pulse" />
+                <div className="flex flex-col">
+                    <span className="text-[9px] font-black text-indigo-300 uppercase tracking-[0.2em] leading-none mb-1">
+                        {currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </span>
+                    <span className="text-sm font-black tracking-tight leading-none">
+                        {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </span>
+                </div>
             </div>
             
             <LanguageSwitcher />
             
-            <button className="p-2 lg:p-2.5 text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors relative">
-                <Bell size={20} />
-                <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 border-2 border-white rounded-full"></span>
-            </button>
+            <NotificationDropdown />
             
-            <div className="flex items-center gap-2 lg:gap-3 pl-2 border-l border-slate-100">
-                <div className="hidden md:block text-right">
-                    <p className="text-xs font-black text-slate-900 leading-none">{user?.name}</p>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user?.role}</p>
-                </div>
-                <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl lg:rounded-2xl bg-indigo-50 border-2 border-indigo-100 flex items-center justify-center text-indigo-600 font-black text-xs lg:text-sm">
-                    {(user?.name?.[0] || 'U').toUpperCase()}
-                </div>
-            </div>
+            <UserMenu />
           </div>
         </header>
 
         {/* Subscription Banner — shown below topbar */}
         <SubscriptionBanner />
 
+        {/* Offline Banner */}
+        {!isOnline && (
+            <div className="bg-red-500 text-white px-4 py-2 flex items-center justify-center gap-3 shadow-md shrink-0 animate-in slide-in-from-top-2">
+                <WifiOff size={18} className="animate-pulse" />
+                <span className="text-sm font-semibold tracking-tight">Offline Mode: Internet unavailable. New bills will be saved as drafts.</span>
+                <Link to="/offline-drafts" className="text-xs font-black underline hover:text-red-100 ml-2">
+                    View Drafts
+                </Link>
+            </div>
+        )}
+
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className={cn(
                 "mx-auto transition-all duration-300",
-                location.pathname === '/cash-sale' || location.pathname === '/table-billing' ? "p-0 max-w-full" : "p-4 lg:p-8 max-w-[1600px]"
+                location.pathname === '/cash-sale' || location.pathname === '/table-billing' ? "p-0 max-w-full" : "p-2 lg:p-4 max-w-[1600px]"
             )}>
                 <Outlet />
             </div>

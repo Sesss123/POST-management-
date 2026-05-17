@@ -204,14 +204,25 @@ const PaymentQRModal = ({
                         </AppButton>
                     )}
 
-                    {/* Mock Button - Visible only in dev/mock provider */}
-                    {(status === 'pending' && process.env.NODE_ENV !== 'production') && (
+                    {/* Manual Verification Button */}
+                    {status === 'pending' && (
                         <button 
                             onClick={handleMockPaid}
-                            className="text-[10px] font-black text-slate-300 uppercase hover:text-indigo-400 transition-colors py-2"
+                            className="text-[11px] font-black text-emerald-600 uppercase hover:bg-emerald-50 transition-all py-3 rounded-2xl border-2 border-dashed border-emerald-200 mt-2 flex items-center justify-center gap-2 active:scale-95"
                         >
-                            <Zap size={12} className="inline mr-1" />
-                            Dev: Simulate Success
+                            <CheckCircle2 size={16} />
+                            Verify Manually (Cashier)
+                        </button>
+                    )}
+
+                    {/* Mock Button - Visible only in dev/mock provider */}
+                    {(status === 'pending' && process.env.NODE_ENV === 'development') && (
+                        <button 
+                            onClick={handleMockPaid}
+                            className="text-[9px] font-black text-slate-300 uppercase hover:text-indigo-400 transition-colors py-1"
+                        >
+                            <Zap size={10} className="inline mr-1" />
+                            Dev: Mock Success
                         </button>
                     )}
                 </div>

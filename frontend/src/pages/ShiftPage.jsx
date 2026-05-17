@@ -139,7 +139,7 @@ const ShiftPage = () => {
                     <Wallet size={20} />
                 </div>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Opening Cash</p>
-                <p className="text-2xl font-black text-slate-900">Rs. {parseFloat(currentShift.opening_cash).toLocaleString()}</p>
+                <p className="text-2xl font-black text-slate-900">Rs. {parseFloat(currentShift.opening_cash || 0).toLocaleString()}</p>
             </AppCard>
 
             <AppCard className="border-none shadow-lg bg-white p-6 flex flex-col gap-2">

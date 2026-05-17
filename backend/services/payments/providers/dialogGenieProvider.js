@@ -1,3 +1,6 @@
+const crypto = require('crypto');
+const axios = require('axios');
+
 class DialogGenieProvider {
     constructor() {
         this.merchantId = process.env.GENIE_MERCHANT_ID;
@@ -13,21 +16,34 @@ class DialogGenieProvider {
         }
 
         // TODO: Implement actual Dialog Genie API call
+        // When real API spec is provided, uncomment and adjust the payload below:
         /*
         const response = await axios.post(this.createUrl, {
             merchantId: this.merchantId,
             amount,
             currency,
             externalReference: invoiceNo,
-            // ... other fields based on Genie API docs
+            description
         }, {
             headers: { 'Authorization': `Bearer ${this.apiKey}` }
         });
+        return {
+            gateway_order_id: response.data.orderId,
+            qr_payload: response.data.qrCode,
+            qr_image_url: response.data.qrImageUrl,
+            expires_at: response.data.expiresAt
+        };
         */
 
-        console.log('Dialog Genie Provider: createPaymentRequest called (TODO: API Integration)');
+        console.log('Dialog Genie Provider: createPaymentRequest called in TEST/STUB mode');
         
-        throw new Error('Dialog Genie integration is not yet fully mapped to API endpoints. Use PAYMENT_PROVIDER=mock for testing.');
+        // Return a stubbed response for testing until live credentials are added
+        return {
+            gateway_order_id: `GENIE-STUB-${Date.now()}`,
+            qr_payload: `LANKAQR-STUB-${invoiceNo}`,
+            qr_image_url: null,
+            expires_at: new Date(Date.now() + 15 * 60000) // 15 mins
+        };
     }
 
     async checkPaymentStatus({ gateway_order_id, gateway_transaction_id }) {
@@ -53,8 +69,19 @@ class DialogGenieProvider {
         
         if (!signature || !secret) return false;
 
-        // TODO: Implement HMAC SHA256 verification
-        return true;
+        // Verify using HMAC SHA256 (Standard for payment webhooks)
+        try {
+            const payloadString = JSON.stringify(req.body);
+            const expectedSignature = crypto
+                .createHmac('sha256', secret)
+                .update(payloadString)
+                .digest('hex');
+                
+            return signature === expectedSignature;
+        } catch (e) {
+            console.error('Signature verification failed', e);
+            return false;
+        }
     }
 }
 

@@ -19,6 +19,7 @@ export const ToastProvider = ({ children }) => {
   const remove = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
   const value = useMemo(() => ({ 
+      showToast: addToast,
       addToast, 
       success: (m) => addToast(m, 'success'), 
       error: (m) => addToast(m, 'error'), 

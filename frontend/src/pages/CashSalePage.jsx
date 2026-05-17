@@ -24,15 +24,20 @@ import {
   Star,
   Clock,
   ArrowRight,
-  Zap
+  Zap,
+  User
 } from 'lucide-react';
 import { AppButton, AppCard, FormInput, AppModal, useToast } from '../components/ui';
 import InvoicePrintModal from '../components/invoice/InvoicePrintModal';
 import AddToCustomerAccountModal from '../components/naya/AddToCustomerAccountModal';
 import ItemModifierModal from '../components/pos/ItemModifierModal';
 import PaymentQRModal from '../components/PaymentQRModal';
+import QuickCashModal from '../components/pos/QuickCashModal';
 import { gatewayPaymentApi } from '../api/api';
 import { cn } from '../utils/cn';
+import { useAuth } from '../context/AuthContext';
+import { useNetwork } from '../hooks/useNetwork';
+import { saveOfflineDraft, getCachedMenu, cacheMenuData } from '../offline/offlineDb';
 
 const toNumber = (value, fallback = 0) => {
   const num = Number(value);
@@ -53,6 +58,9 @@ const CashSalePage = () => {
   const [currentShift, setCurrentShift] = useState(null);
   const [cashReceived, setCashReceived] = useState(0);
   
+  const { user } = useAuth();
+  const isOnline = useNetwork();
+
   // Loyalty State
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loyaltyPointsRedeem, setLoyaltyPointsRedeem] = useState(0);
@@ -104,18 +112,52 @@ const CashSalePage = () => {
 
   const fetchItems = async () => {
     try {
-      const { data } = await itemApi.getAll();
-      const activeItems = data.data.filter(i => 
-        i.status === 'active' && 
-        (i.is_restaurant_item === 1 || i.is_restaurant_item === true)
-      );
+      let activeItems = [];
+      if (isOnline) {
+          const { data } = await itemApi.getAll();
+          activeItems = data.data.filter(i => 
+            i.status === 'active' && 
+            (i.is_restaurant_item === 1 || i.is_restaurant_item === true)
+          );
+          if (user?.shop_id) {
+              await cacheMenuData(user.shop_id, activeItems);
+          }
+      } else {
+          if (user?.shop_id) {
+              activeItems = await getCachedMenu(user.shop_id) || [];
+          }
+      }
       setItems(activeItems);
       
       // Extract unique categories and main categories
-      const cats = ['All', 'Combos', ...new Set(activeItems.map(i => i.category))];
+      const categoryPriority = {
+        'rice & curry': 1,
+        'rice and curry': 1,
+        'fried rice': 2,
+        'kottu': 3,
+        'noodles': 4,
+        'devilled / stew / fried': 5,
+        'eggs & extras': 6,
+        'seafood specials': 7,
+        'beverages': 8,
+        'beverage': 8,
+        'retail': 9,
+        'small retail': 10,
+        'dessert': 11,
+        'packing / extras': 12
+      };
+
+      const sortCats = (a, b) => {
+        const pA = categoryPriority[a.toLowerCase()] || 99;
+        const pB = categoryPriority[b.toLowerCase()] || 99;
+        if (pA !== pB) return pA - pB;
+        return a.localeCompare(b);
+      };
+
+      const cats = ['All', 'Combos', ...new Set(activeItems.map(i => i.category))].sort(sortCats);
       setCategories(cats);
       
-      const mainCats = [...new Set(activeItems.map(i => i.main_category).filter(Boolean))];
+      const mainCats = [...new Set(activeItems.map(i => i.main_category).filter(Boolean))].sort(sortCats);
       setMainCategories(mainCats);
     } catch (err) {
       toast.error('Failed to load items');
@@ -174,10 +216,14 @@ const CashSalePage = () => {
 
   useEffect(() => {
     fetchItems();
-    fetchCombos();
-    fetchSettings();
-    fetchShiftStatus();
-    fetchWaiters();
+    if (isOnline) fetchCombos();
+    if (isOnline) fetchSettings();
+    if (isOnline) fetchShiftStatus();
+    if (isOnline) fetchWaiters();
+
+    if (!isOnline && paymentMethod !== 'cash') {
+        setPaymentMethod('cash');
+    }
 
     // Check for bill resumption request from HeldBillsPage
     const resumeId = localStorage.getItem('resume_held_bill_id');
@@ -242,8 +288,18 @@ const CashSalePage = () => {
       toast.success('Cart restored for editing');
   };
 
-  const updateQty = (id, delta, is_combo = false) => {
-    setCart(prev => prev.map(i => {
+  const updateQty = (id, delta, is_combo = false, index = null) => {
+    setCart(prev => prev.map((i, idx) => {
+      // If index is provided, use it for exact match
+      if (index !== null) {
+        if (idx === index) {
+          const newQty = Math.max(1, i.qty + delta);
+          return { ...i, qty: newQty };
+        }
+        return i;
+      }
+      
+      // Fallback to ID match (legacy/safety)
       if (i.id === id && i.is_combo === is_combo) {
         const newQty = Math.max(1, i.qty + delta);
         return { ...i, qty: newQty };
@@ -252,7 +308,12 @@ const CashSalePage = () => {
     }));
   };
 
-  const removeItem = (id, is_combo = false) => setCart(prev => prev.filter(i => !(i.id === id && i.is_combo === is_combo)));
+  const removeItem = (id, is_combo = false, index = null) => {
+    setCart(prev => prev.filter((i, idx) => {
+      if (index !== null) return idx !== index;
+      return !(i.id === id && i.is_combo === is_combo);
+    }));
+  };
 
 
 
@@ -292,7 +353,34 @@ const CashSalePage = () => {
         held_bill_id: resumedBill?.id || null
       };
 
+      if (!isOnline) {
+          if (settings.offline_mode_enabled !== 'true') {
+              setProcessing(false);
+              return toast.error('Offline Mode is disabled in settings.');
+          }
+          await saveOfflineDraft({
+              type: 'cash_sale',
+              shop_id: user.shop_id,
+              user_id: user.id,
+              items: payload.items,
+              payment_method: payload.payment_method,
+              cash_received: payload.cash_received,
+              estimated_subtotal: subtotal,
+              estimated_total: grandTotal,
+              discount_value: payload.discount_value,
+              customer_id: payload.customer_id
+          });
+          toast.success('Offline Draft Saved Successfully. Please sync when online.');
+          setCart([]);
+          setDiscount(0);
+          setCashReceived(0);
+          setSelectedCustomer(null);
+          setProcessing(false);
+          return;
+      }
+
       if (paymentMethod === 'qr') {
+          console.log('Initiating Cash Sale QR Payment Payload:', payload);
           const res = await gatewayPaymentApi.createQR(payload);
           setQrTransactionData(res.data.data);
           setShowQRModal(true);
@@ -330,6 +418,16 @@ const CashSalePage = () => {
       if (settings.shift_enforcement_enabled === 'true' && !currentShift) {
           return toast.error('SHIFT ENFORCEMENT: Please open a shift before billing.');
       }
+      
+      // Pre-fill customer details if already selected in loyalty
+      if (selectedCustomer) {
+          setHoldDetails(prev => ({
+              ...prev,
+              customer_name: selectedCustomer.name || '',
+              customer_phone: selectedCustomer.phone || ''
+          }));
+      }
+
       setShowHoldModal(true);
   };
 
@@ -703,11 +801,21 @@ const CashSalePage = () => {
 
         {/* Item Area */}
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10 mt-3">
+            <div className="mb-4 px-1">
+                <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight leading-tight">
+                    {selectedMainCategory}
+                </h2>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {filteredItems.length} Items found
+                </p>
+                <div className="w-12 h-1 bg-indigo-600 rounded-full mt-2" />
+            </div>
+
             {viewMode === 'grid' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 {filteredItems.map(item => {
-                  const isAvailable = (item.availability_status === 'available' || item.is_combo) && (!item.track_stock || item.stock_qty > 0);
-                  const isSoldOut = (item.availability_status === 'sold_out' || (item.track_stock && item.stock_qty <= 0)) && !item.is_combo;
+                  const isAvailable = !!((item.availability_status === 'available' || item.is_combo) && (!item.track_stock || item.stock_qty > 0));
+                  const isSoldOut = !!((item.availability_status === 'sold_out' || (item.track_stock && item.stock_qty <= 0)) && !item.is_combo);
     
                   return (
                     <button
@@ -868,21 +976,7 @@ const CashSalePage = () => {
                 <UtensilsCrossed size={14} /> Dine-In
             </button>
         </div>
-        <div className="px-4 py-2 border-b border-slate-100 bg-white flex items-center gap-4 shrink-0 overflow-x-auto">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-                <UserCircle size={14} className="text-slate-400" />
-                <select 
-                    className="w-full text-[10px] font-black text-slate-500 uppercase tracking-widest outline-none bg-transparent py-1 cursor-pointer truncate"
-                    value={selectedWaiter}
-                    onChange={(e) => setSelectedWaiter(e.target.value)}
-                >
-                    <option value="">Select Waiter</option>
-                    {waiters.map(w => (
-                        <option key={w.id} value={w.id}>{w.name}</option>
-                    ))}
-                </select>
-            </div>
-            <div className="h-4 w-px bg-slate-200 shrink-0" />
+        <div className="px-4 py-2 border-b border-slate-100 bg-white flex items-center justify-center shrink-0">
             <button 
                 onClick={() => setShowCustomerSelectModal(true)}
                 className={cn(
@@ -1063,22 +1157,35 @@ const CashSalePage = () => {
                 <Banknote size={14} /> Cash
             </button>
             <button 
-                onClick={() => setPaymentMethod('card')}
+                onClick={() => isOnline && setPaymentMethod('card')}
+                disabled={!isOnline}
                 className={cn(
                     "flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all font-black text-[9px] uppercase tracking-widest",
-                    paymentMethod === 'card' ? "bg-blue-600 border-blue-600 text-white shadow-xl shadow-blue-100" : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
+                    !isOnline ? "opacity-50 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400" : paymentMethod === 'card' ? "bg-blue-600 border-blue-600 text-white shadow-xl shadow-blue-100" : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
                 )}
             >
                 <CreditCard size={14} /> Card
             </button>
             <button 
-                onClick={() => setPaymentMethod('qr')}
+                onClick={() => {
+                    if (cart.length === 0) return toast.error('Cart is empty');
+                    if (isOnline) {
+                        setPaymentMethod('qr');
+                        handleCheckout();
+                    }
+                }}
+                disabled={cart.length === 0 || processing || !isOnline}
                 className={cn(
-                    "flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all font-black text-[9px] uppercase tracking-widest",
-                    paymentMethod === 'qr' ? "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-100" : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
+                    "col-span-2 flex items-center justify-center gap-2 py-3.5 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-widest",
+                    cart.length === 0 || processing || !isOnline
+                        ? "opacity-50 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400"
+                        : "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-100 hover:bg-indigo-700 active:scale-[0.98]"
                 )}
             >
-                <Zap size={14} /> QR Pay
+                {processing && paymentMethod === 'qr' 
+                    ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full mr-1"></span> Processing...</>
+                    : <><Zap size={14} /> QR Pay — Tap to Start</>
+                }
             </button>
           </div>
 
@@ -1127,9 +1234,9 @@ const CashSalePage = () => {
             <button 
                 className={cn(
                     "px-4 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2",
-                    cart.length === 0 || processing ? "bg-slate-100 text-slate-300 cursor-not-allowed" : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                    cart.length === 0 || processing || !isOnline ? "bg-slate-100 text-slate-300 cursor-not-allowed" : "bg-amber-100 text-amber-700 hover:bg-amber-200"
                 )}
-                disabled={cart.length === 0 || processing}
+                disabled={cart.length === 0 || processing || !isOnline}
                 onClick={handleHoldBill}
                 title="Park Bill (F4)"
             >
@@ -1140,9 +1247,9 @@ const CashSalePage = () => {
                 variant="secondary"
                 className={cn(
                     "px-4 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all",
-                    cart.length === 0 || processing ? "bg-slate-100 text-slate-300 cursor-not-allowed" : "bg-white text-purple-600 border-purple-100 hover:bg-purple-50"
+                    cart.length === 0 || processing || !isOnline ? "bg-slate-100 text-slate-300 cursor-not-allowed" : "bg-white text-purple-600 border-purple-100 hover:bg-purple-50"
                 )}
-                disabled={cart.length === 0 || processing}
+                disabled={cart.length === 0 || processing || !isOnline}
                 onClick={() => setShowAccountModal(true)}
             >
                 {resumedBill ? 'SETTLE HELD AS NAYA' : 'ADD TO ACCOUNT'}
@@ -1159,7 +1266,7 @@ const CashSalePage = () => {
                 loading={processing}
                 disabled={cart.length === 0 || (paymentMethod === 'cash' && toNumber(cashReceived) < grandTotal)}
             >
-                {resumedBill ? 'FINALIZE HELD BILL' : 'COMPLETE & PRINT'}
+                {!isOnline ? 'SAVE OFFLINE DRAFT' : resumedBill ? 'FINALIZE HELD BILL' : 'COMPLETE & PRINT'}
             </AppButton>
 
             {!resumedBill && paymentMethod === 'cash' && settings.quick_sale_enabled && (
@@ -1191,9 +1298,14 @@ const CashSalePage = () => {
       >
         <div className="space-y-4 py-4">
             {heldBills.length === 0 ? (
-                <div className="py-12 text-center opacity-30">
-                    <History size={48} className="mx-auto mb-4" />
-                    <p className="font-bold">No parked bills found</p>
+                <div className="py-20 text-center flex flex-col items-center justify-center space-y-6">
+                    <div className="w-24 h-24 bg-slate-50 rounded-[40px] flex items-center justify-center border-2 border-slate-100/50 shadow-inner group transition-all">
+                        <History size={40} className="text-slate-300 group-hover:text-indigo-600 transition-colors" />
+                    </div>
+                    <div className="space-y-1">
+                        <h4 className="text-lg font-black text-slate-900 uppercase tracking-tight">No Parked Bills</h4>
+                        <p className="text-slate-400 text-xs font-medium max-w-[200px] mx-auto italic">Your temporary waiting list is currently empty.</p>
+                    </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
@@ -1203,6 +1315,11 @@ const CashSalePage = () => {
                                 <div>
                                     <h4 className="font-black text-slate-900 text-sm leading-tight uppercase tracking-tight truncate max-w-[150px]">{bill.customer_name || bill.reference_name}</h4>
                                     <p className="text-[10px] font-black text-indigo-600 tracking-widest uppercase">{bill.hold_no}</p>
+                                    {bill.item_summary && (
+                                        <p className="text-[9px] font-bold text-slate-500 mt-2 line-clamp-2 bg-white/50 p-2 rounded-xl border border-slate-100 italic">
+                                            {bill.item_summary}
+                                        </p>
+                                    )}
                                     <p className="text-[9px] font-bold text-slate-400 mt-1">
                                         {new Date(bill.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </p>
@@ -1246,7 +1363,7 @@ const CashSalePage = () => {
               setShowPrintModal(false);
               setLastInvoice(null);
           }}
-          invoice={lastInvoice}
+          invoice={lastInvoice ? (lastInvoice.settings ? lastInvoice : { ...lastInvoice, settings }) : null} 
           onRestore={handleRestoreCart}
         />
 
@@ -1254,9 +1371,17 @@ const CashSalePage = () => {
             isOpen={showQRModal}
             onClose={() => setShowQRModal(false)}
             transactionData={qrTransactionData}
-            onSuccess={(data) => {
+            onSuccess={async (data) => {
                 setShowQRModal(false);
-                setLastInvoice({ id: qrTransactionData.invoice_id, invoice_no: qrTransactionData.invoice_no });
+                // Fetch full invoice details (with items) after QR payment
+                try {
+                    const { invoiceApi: invApi } = await import('../api/api');
+                    const invRes = await invApi.getDetails(qrTransactionData.invoice_id);
+                    const fullInv = invRes.data.data || invRes.data;
+                    setLastInvoice(fullInv.settings ? fullInv : { ...fullInv, settings });
+                } catch (e) {
+                    setLastInvoice({ id: qrTransactionData.invoice_id, invoice_no: qrTransactionData.invoice_no, settings });
+                }
                 setShowPrintModal(true);
                 setCart([]);
                 setDiscount(0);
@@ -1313,7 +1438,7 @@ const CashSalePage = () => {
                         <FormInput 
                             placeholder="e.g. John Doe" 
                             value={holdDetails.customer_name}
-                            onChange={(val) => setHoldDetails(prev => ({ ...prev, customer_name: val }))}
+                            onChange={(e) => setHoldDetails(prev => ({ ...prev, customer_name: e.target.value }))}
                         />
                     </div>
                     <div className="space-y-1.5">
@@ -1321,7 +1446,7 @@ const CashSalePage = () => {
                         <FormInput 
                             placeholder="e.g. 0771234567" 
                             value={holdDetails.customer_phone}
-                            onChange={(val) => setHoldDetails(prev => ({ ...prev, customer_phone: val }))}
+                            onChange={(e) => setHoldDetails(prev => ({ ...prev, customer_phone: e.target.value }))}
                         />
                     </div>
                     <div className="space-y-1.5">
@@ -1353,88 +1478,57 @@ const CashSalePage = () => {
             </div>
         </AppModal>
 
-      {/* Quick Cash Modal */}
-      <AppModal isOpen={showQuickCashModal} onClose={() => setShowQuickCashModal(false)} title="Quick Cash (No Receipt)" size="sm">
-          <div className="space-y-6">
-              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 mb-4 text-center">
-                  <p className="text-xs font-bold text-emerald-700 uppercase">Payable Amount</p>
-                  <p className="text-3xl font-black text-slate-900 tracking-tighter">Rs. {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              </div>
-              
-              {cart.some(i => i.requires_age_confirmation) && (
-                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
-                      <AlertCircle className="text-rose-600 shrink-0" size={20} />
-                      <div className="text-left">
-                          <p className="text-xs font-black text-rose-800 uppercase tracking-tight">Age Verification Required</p>
-                          <p className="text-[10px] text-rose-600 font-bold leading-tight mt-1">Cart contains age-restricted items. By completing this sale, you confirm you have verified the customer's age.</p>
-                      </div>
-                  </div>
-              )}
+      <QuickCashModal 
+        isOpen={showQuickCashModal}
+        onClose={() => setShowQuickCashModal(false)}
+        amount={grandTotal}
+        onConfirm={async (receivedAmount) => {
+            if (settings.shift_enforcement_enabled === 'true' && !currentShift) {
+                return toast.error('SHIFT ENFORCEMENT: Please open a shift before billing.');
+            }
+            setProcessing(true);
+            try {
+                const payload = {
+                    items: cart.map(i => ({ 
+                        id: i.id, 
+                        item_id: i.id, 
+                        qty: i.qty, 
+                        is_combo: i.is_combo || false, 
+                        name: i.name, 
+                        price: i.unit_price || i.price,
+                        modifier_total: i.modifier_total || 0,
+                        special_note: i.special_note || null,
+                        modifiers: i.modifiers || [],
+                        age_confirmed: cart.some(item => item.requires_age_confirmation) ? true : false
+                    })),
+                    subtotal,
+                    discount_value: toNumber(discount),
+                    discount_type: 'fixed',
+                    promotion_id: selectedPromo?.id || null,
+                    tax_amount: tax,
+                    service_charge_amount: sc,
+                    grand_total: grandTotal,
+                    payment_method: 'cash',
+                    order_type: orderType,
+                    waiter_id: selectedWaiter || null,
+                    cash_received: receivedAmount
+                };
 
-              <div className="grid grid-cols-2 gap-3">
-                  {['Exact', '+100', '+500', '+1000'].map(btn => {
-                      let val = grandTotal;
-                      if (btn !== 'Exact') val += parseInt(btn.replace('+', ''));
-                      return (
-                          <button 
-                              key={btn}
-                              onClick={async () => {
-                                  if (settings.shift_enforcement_enabled && !currentShift) {
-                                      return toast.error('SHIFT ENFORCEMENT: Please open a shift before billing.');
-                                  }
-                                  setProcessing(true);
-                                  try {
-                                      const payload = {
-                                          items: cart.map(i => ({ 
-                                              id: i.id, 
-                                              item_id: i.id, 
-                                              qty: i.qty, 
-                                              is_combo: i.is_combo || false, 
-                                              name: i.name, 
-                                              price: i.unit_price || i.price,
-                                              modifier_total: i.modifier_total || 0,
-                                              special_note: i.special_note || null,
-                                              modifiers: i.modifiers || [],
-                                              age_confirmed: cart.some(item => item.requires_age_confirmation) ? true : false
-                                          })),
-                                          subtotal,
-                                          discount_value: toNumber(discount),
-                                          discount_type: 'fixed',
-                                          promotion_id: selectedPromo?.id || null,
-                                          tax_amount: tax,
-                                          service_charge_amount: sc,
-                                          grand_total: grandTotal,
-                                          payment_method: 'cash',
-                                          order_type: orderType,
-                                          waiter_id: selectedWaiter || null,
-                                          cash_received: val
-                                      };
-
-                                      await invoiceApi.createQuickSale(payload);
-                                      
-                                      toast.success('Quick Sale Completed!');
-                                      setCart([]);
-                                      setDiscount(0);
-                                      setCashReceived(0);
-                                      setShowQuickCashModal(false);
-                                  } catch (err) {
-                                      toast.error(err.response?.data?.message || 'Quick Sale failed');
-                                  } finally {
-                                      setProcessing(false);
-                                  }
-                              }}
-                              disabled={processing}
-                              className="px-4 py-4 bg-slate-100 hover:bg-emerald-100 text-slate-700 hover:text-emerald-700 rounded-xl text-lg font-black uppercase transition-all shadow-sm border border-slate-200 hover:border-emerald-300 active:scale-95 flex flex-col items-center justify-center gap-1"
-                          >
-                              {btn}
-                              {btn !== 'Exact' && <span className="text-[10px] text-slate-400 font-bold uppercase">(Change: {val - grandTotal})</span>}
-                          </button>
-                      );
-                  })}
-              </div>
-              <AppButton variant="secondary" className="w-full" type="button" onClick={() => setShowQuickCashModal(false)} disabled={processing}>Cancel</AppButton>
-          </div>
-      </AppModal>
+                await invoiceApi.createQuickSale(payload);
+                
+                toast.success('Quick Sale Completed!');
+                setCart([]);
+                setDiscount(0);
+                setCashReceived(0);
+                setShowQuickCashModal(false);
+            } catch (err) {
+                toast.error(err.response?.data?.message || 'Quick Sale failed');
+            } finally {
+                setProcessing(false);
+            }
+        }}
+        processing={processing}
+      />
 
       {/* Mobile Floating Action Button */}
       <div className="fixed bottom-6 right-6 lg:hidden z-50 flex flex-col gap-3">
@@ -1453,6 +1547,24 @@ const CashSalePage = () => {
             {isCartOpen ? <X size={28} /> : <ShoppingCart size={28} />}
           </button>
       </div>
+
+      <PaymentQRModal 
+            isOpen={showQRModal}
+            onClose={() => setShowQRModal(false)}
+            transactionData={qrTransactionData}
+            onSuccess={(data) => {
+                setShowQRModal(false);
+                setCart([]);
+                setCustomerSearch('');
+                setSelectedCustomer(null);
+                setCashReceived('');
+                setChangeAmount(0);
+                setDiscountValue(0);
+                setLastInvoice(data);
+                setShowPrintModal(true);
+                toast.success('QR Payment successful');
+            }}
+      />
     </div>
   );
 };
