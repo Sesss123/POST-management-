@@ -113,7 +113,8 @@ app.use(cors({
         if (!origin) return callback(null, true);
         
         const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
-        if (allowedOrigins.indexOf(origin) !== -1 || isLocalhost) {
+        const isRender = origin.endsWith('.onrender.com');
+        if (allowedOrigins.indexOf(origin) !== -1 || isLocalhost || isRender) {
             return callback(null, true);
         } else {
             return callback(new Error('CORS blocked'), false);

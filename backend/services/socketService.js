@@ -5,12 +5,23 @@ let io = null;
 const init = (server) => {
     io = new Server(server, {
         cors: {
-            origin: [
-                process.env.FRONTEND_URL || 'http://localhost:5173',
-                'http://localhost:5174',
-                'http://localhost:5175',
-                'http://127.0.0.1:5173'
-            ],
+            origin: function (origin, callback) {
+                if (!origin) return callback(null, true);
+                const allowedOrigins = [
+                    process.env.FRONTEND_URL || 'http://localhost:5173',
+                    'http://localhost:5174',
+                    'http://localhost:5175',
+                    'http://127.0.0.1:5173',
+                    'http://127.0.0.1:5174',
+                    'http://127.0.0.1:5175'
+                ];
+                const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+                const isRender = origin.endsWith('.onrender.com');
+                if (allowedOrigins.indexOf(origin) !== -1 || isLocalhost || isRender) {
+                    return callback(null, origin);
+                }
+                return callback(new Error('CORS blocked'), false);
+            },
             methods: ['GET', 'POST'],
             credentials: true
         }
