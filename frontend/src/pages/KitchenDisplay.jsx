@@ -45,6 +45,51 @@ const KitchenDisplay = () => {
   const [activeTab, setActiveTab] = useState('active'); // 'active' or 'history'
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshInterval] = useState(10000); // 10 seconds
+  const [timeTicker, setTimeTicker] = useState(0);
+
+  // Synth chime sound helper
+  const playKdsChime = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      
+      // Tone 1: C5 (523.25 Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(523.25, ctx.currentTime);
+      gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      
+      // Tone 2: E5 (659.25 Hz)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
+      gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.1);
+      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      
+      osc1.start();
+      osc1.stop(ctx.currentTime + 0.5);
+      osc2.start(ctx.currentTime + 0.1);
+      osc2.stop(ctx.currentTime + 0.6);
+    } catch (e) {
+      console.warn("KDS audio chime failed to play:", e);
+    }
+  };
+
+  // State ticker interval running every 30 seconds to update cooking timers dynamically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeTicker(prev => prev + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
   
   // Filters
   const [filters, setFilters] = useState({
@@ -86,10 +131,14 @@ const KitchenDisplay = () => {
       
       const socket = getSocket();
       if (socket) {
-        socket.on('new_kot', fetchKots);
+        const handleNewKot = () => {
+          playKdsChime();
+          fetchKots();
+        };
+        socket.on('new_kot', handleNewKot);
         socket.on('kot_status_updated', fetchKots);
         return () => {
-          socket.off('new_kot', fetchKots);
+          socket.off('new_kot', handleNewKot);
           socket.off('kot_status_updated', fetchKots);
         };
       }
@@ -151,9 +200,15 @@ const KitchenDisplay = () => {
     const elapsed = getElapsedTime(kot.created_at);
     const timeStyles = getTimeColor(elapsed);
     
+    // Warning thresholds
+    const isWarning = (kot.status === 'pending' || kot.status === 'preparing') && elapsed >= 15 && elapsed < 25;
+    const isCritical = (kot.status === 'pending' || kot.status === 'preparing') && elapsed >= 25;
+    
     return (
       <div key={kot.uuid || kot.id} className={cn(
         "bg-white rounded-[2rem] border-2 shadow-xl shadow-slate-200/40 transition-all duration-300 flex flex-col overflow-hidden animate-in zoom-in-95",
+        isCritical ? "border-rose-500 animate-pulse-rose" :
+        isWarning ? "border-amber-500 animate-pulse-amber" :
         kot.status === 'pending' ? "border-amber-100 ring-4 ring-amber-50/50" :
         kot.status === 'preparing' ? "border-indigo-100 ring-4 ring-indigo-50/50" :
         kot.status === 'ready' ? "border-emerald-100 ring-4 ring-emerald-50/50" : "border-slate-100"

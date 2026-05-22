@@ -1,6 +1,13 @@
 # 🛠️ Task Tracking - RestoLedger Modernization
 
 ## Completed
+- [x] Integrate direct "Credentials" lookup modal in Shop Details dashboard header (2026-05-18)
+- [x] Integrate one-click "Auto-Generate Credentials" tool in CreateShopPage form (2026-05-18)
+- [x] Add direct "Governance" shortcut button to Shop Details Page for instant access (2026-05-18)
+- [x] Resolve database schema mismatch by patching missing `uuid` and `note` columns in `subscription_logs` table (2026-05-18)
+- [x] Implement dynamic plan upgrade selector dropdown during payment record (2026-05-18)
+- [x] Add self-profile Change Password secure form to Settings Security tab for shop admins (2026-05-18)
+- [x] Add secure temp_password tracking and visibility for Super Admin account creation and password retrieval (2026-05-18)
 - [x] Add KDS Terminal to Admin Panel & Modernize Dashboard Widget (2026-05-13)
 - [x] Modernize Dashboard UI & Fix "Sales by Category" Chart (2026-05-13)
 - [x] Consolidate KOT Orders into Reports Manifest (2026-05-13)

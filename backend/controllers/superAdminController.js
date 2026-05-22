@@ -293,13 +293,14 @@ exports.createShop = async (req, res) => {
         const [shopResult] = await connection.query(
             `INSERT INTO shops
              (uuid, name, identifier, slug, email, phone, address, status, subscription_status, subscription_plan,
-              trial_ends_at)
+              trial_ends_at, temp_password)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'trial', 'standard',
-              DATE_ADD(CURDATE(), INTERVAL ? DAY))`,
+              DATE_ADD(CURDATE(), INTERVAL ? DAY), ?)`,
             [
                 shopUuid, name, identifier, identifier, 
                 shop_email || null, shop_phone || null, shop_address || null,
-                platformSettingsService.getInt('trial_days', 14)
+                platformSettingsService.getInt('trial_days', 14),
+                admin_password
             ]
         );
         const shopId = shopResult.insertId;
@@ -307,8 +308,8 @@ exports.createShop = async (req, res) => {
         const hashedPassword = await bcrypt.hash(admin_password, 10);
         const userUuid = generateUuid();
         await connection.query(
-            'INSERT INTO users (uuid, name, email, password, role, shop_id, status) VALUES (?, ?, ?, ?, "admin", ?, "active")',
-            [userUuid, admin_name, admin_email, hashedPassword, shopId]
+            'INSERT INTO users (uuid, name, email, password, role, shop_id, status, temp_password) VALUES (?, ?, ?, ?, "admin", ?, "active", ?)',
+            [userUuid, admin_name, admin_email, hashedPassword, shopId, admin_password]
         );
 
         const defaultSettings = [
@@ -436,8 +437,8 @@ exports.createShopAdmin = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const uuid = generateUuid();
         await db.query(
-            'INSERT INTO users (uuid, name, email, password, role, shop_id, status) VALUES (?, ?, ?, ?, "admin", ?, "active")',
-            [uuid, name, email, hashedPassword, shopId]
+            'INSERT INTO users (uuid, name, email, password, role, shop_id, status, temp_password) VALUES (?, ?, ?, ?, "admin", ?, "active", ?)',
+            [uuid, name, email, hashedPassword, shopId, password]
         );
 
         // Get shop name for welcome email
@@ -794,7 +795,7 @@ exports.getSubscriptionLogs = async (req, res) => {
 exports.getPlatformUsers = async (req, res) => {
     try {
         const [users] = await db.query(`
-            SELECT u.id, u.uuid, u.name, u.email, u.role, u.status, u.created_at, s.name as shop_name
+            SELECT u.id, u.uuid, u.name, u.email, u.role, u.status, u.created_at, u.temp_password, s.name as shop_name
             FROM users u
             LEFT JOIN shops s ON u.shop_id = s.id
             ORDER BY u.created_at DESC
@@ -819,8 +820,8 @@ exports.createPlatformUser = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const uuid = generateUuid();
         await db.query(
-            'INSERT INTO users (uuid, name, email, password, role, status) VALUES (?, ?, ?, ?, ?, "active")',
-            [uuid, name, email, hashedPassword, role]
+            'INSERT INTO users (uuid, name, email, password, role, status, temp_password) VALUES (?, ?, ?, ?, ?, "active", ?)',
+            [uuid, name, email, hashedPassword, role, password]
         );
 
         // Audit Log
@@ -862,7 +863,7 @@ exports.resetUserPassword = async (req, res) => {
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        await db.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
+        await db.query('UPDATE users SET password = ?, temp_password = ? WHERE id = ?', [hashedPassword, password, userId]);
 
         // Audit Log
         await db.query(

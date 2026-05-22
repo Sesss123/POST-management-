@@ -42,7 +42,8 @@ const ShopAccessGovernancePage = () => {
         days: 7,
         payment_method: 'Cash', 
         reference_no: '', 
-        notes: '' 
+        notes: '',
+        plan: ''
     });
 
     useEffect(() => {
@@ -55,6 +56,7 @@ const ShopAccessGovernancePage = () => {
             const { data } = await api.get(`/super-admin/shops/${identifier}`);
             if (data.success) {
                 setShop(data.data);
+                setForm(p => ({ ...p, plan: data.data.subscription_plan || 'standard' }));
             }
         } catch (err) {
             console.error(err);
@@ -212,6 +214,21 @@ const ShopAccessGovernancePage = () => {
                                             onChange={e => setForm(p => ({ ...p, months: e.target.value }))}
                                         >
                                             {[1,2,3,6,12].map(m => <option key={m} value={m}>{m} Month Registry</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-4 mb-3 block">Target Plan / Package</label>
+                                        <select
+                                            className="w-full px-8 py-5 bg-slate-950 border border-white/5 rounded-[2rem] text-white font-bold focus:outline-none focus:border-indigo-500 transition-all appearance-none"
+                                            value={form.plan}
+                                            onChange={e => setForm(p => ({ ...p, plan: e.target.value }))}
+                                        >
+                                            <option value="">-- Keep Current Plan --</option>
+                                            <option value="starter">Starter Node</option>
+                                            <option value="business">Business Stream</option>
+                                            <option value="ultimate">Ultimate Neural</option>
+                                            <option value="Standard">Standard (Legacy)</option>
+                                            <option value="Premium">Premium (Legacy)</option>
                                         </select>
                                     </div>
                                 </div>

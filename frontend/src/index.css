@@ -69,6 +69,18 @@
   animation: scan 2s linear infinite;
 }
 
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+.animate-spin-slow {
+  animation: spin 10s linear infinite;
+}
+
 /* Glassmorphism */
 .glass {
   @apply bg-white/70 backdrop-blur-md border border-white/20;
@@ -145,3 +157,231 @@
 .animate-tada {
   animation: tada 1s ease-in-out infinite;
 }
+
+/* ==========================================
+   Obsidian Dark Mode Overrides (Cyber Neon Accent)
+   ========================================== */
+.dark {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark body {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Base layouts and wrappers */
+.dark .min-h-screen,
+.dark main {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Header and Sidebar */
+.dark header {
+  background-color: #0f172a !important;
+  border-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+.dark header h2, 
+.dark header span,
+.dark header p {
+  color: #f8fafc !important;
+}
+
+.dark aside {
+  background-color: #090d16 !important;
+  border-right: 1px solid #1e293b !important;
+}
+
+/* Cards and Panels */
+.dark .card,
+.dark .stat-card,
+.dark section.bg-white,
+.dark div.bg-white,
+.dark .bg-white {
+  background-color: #0f172a !important;
+  border-color: #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+/* Neutral text overrides */
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-600,
+.dark h1,
+.dark h2,
+.dark h3,
+.dark h4,
+.dark h5,
+.dark h6 {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400,
+.dark .text-stone-500,
+.dark .text-stone-400 {
+  color: #94a3b8 !important;
+}
+
+/* Slate backgrounds, stripes and dividers */
+.dark .bg-slate-50,
+.dark .bg-slate-100,
+.dark .bg-slate-100\/50,
+.dark .bg-slate-100\/30,
+.dark .bg-stone-50,
+.dark .bg-stone-100 {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .border-slate-50,
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-stone-50,
+.dark .border-stone-100 {
+  border-color: #1e293b !important;
+}
+
+/* Buttons and Interactions */
+.dark .btn-secondary,
+.dark button.bg-slate-100,
+.dark button.bg-slate-50 {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .btn-secondary:hover,
+.dark button.bg-slate-100:hover,
+.dark button.bg-slate-50:hover {
+  background-color: #334155 !important;
+}
+
+/* Forms & Inputs */
+.dark input,
+.dark select,
+.dark textarea,
+.dark .input-field {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus,
+.dark .input-field:focus {
+  background-color: #0f172a !important;
+  border-color: #6366f1 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Electric Indigo Accent modifications */
+.dark .bg-indigo-600 {
+  background-color: #6366f1 !important; /* Cyber Indigo */
+}
+
+.dark .text-indigo-600 {
+  color: #818cf8 !important;
+}
+
+.dark .bg-indigo-50,
+.dark .bg-indigo-50\/50 {
+  background-color: #1e1b4b !important; /* Deep indigo dark mode */
+  color: #e0e7ff !important;
+}
+
+.dark .border-indigo-100,
+.dark .border-indigo-200 {
+  border-color: #312e81 !important;
+}
+
+/* Cyber Emerald Accent modifications */
+.dark .bg-emerald-500,
+.dark .bg-emerald-600 {
+  background-color: #10b981 !important; /* Cyber Emerald */
+}
+
+.dark .text-emerald-600,
+.dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/30 {
+  background-color: #064e3b !important; /* Deep emerald dark mode */
+  color: #d1fae5 !important;
+}
+
+.dark .border-emerald-100,
+.dark .border-emerald-200 {
+  border-color: #065f46 !important;
+}
+
+/* Amber/Yellow warning modifications */
+.dark .bg-amber-50,
+.dark .bg-amber-100 {
+  background-color: #78350f !important;
+  color: #fef3c7 !important;
+}
+
+.dark .text-amber-600,
+.dark .text-amber-700 {
+  color: #fbbf24 !important;
+}
+
+/* Modals */
+.dark .bg-white.rounded-3xl,
+.dark .bg-white.rounded-\[40px\],
+.dark .bg-white.rounded-\[32px\] {
+  background-color: #0f172a !important;
+  border: 1px solid #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+/* Glassmorphism */
+.dark .glass {
+  background-color: rgba(15, 23, 42, 0.7) !important;
+  border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* ==========================================
+   KDS Warning and Critical Pulse Animations
+   ========================================== */
+@keyframes pulse-amber-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0px rgba(245, 158, 11, 0.3);
+    border-color: rgba(245, 158, 11, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 15px 3px rgba(245, 158, 11, 0.6);
+    border-color: rgba(245, 158, 11, 0.9);
+  }
+}
+.animate-pulse-amber {
+  animation: pulse-amber-glow 2s infinite ease-in-out !important;
+}
+
+@keyframes pulse-rose-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0px rgba(244, 63, 94, 0.3);
+    border-color: rgba(244, 63, 94, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px 5px rgba(244, 63, 94, 0.7);
+    border-color: rgba(244, 63, 94, 0.9);
+  }
+}
+.animate-pulse-rose {
+  animation: pulse-rose-glow 1.5s infinite ease-in-out !important;
+}
+

@@ -48,6 +48,7 @@ import QuickCashModal from '../components/pos/QuickCashModal';
 import { gatewayPaymentApi } from '../api/api';
 import { cn } from '../utils/cn';
 import { useAuth } from '../context/AuthContext';
+import FloorPlanMap from '../components/tables/FloorPlanMap';
 
 const TableBillingPage = () => {
   const { user } = useAuth();
@@ -68,6 +69,7 @@ const TableBillingPage = () => {
   const [selectedMainCategory, setSelectedMainCategory] = useState('All');
   const [portionFilter, setPortionFilter] = useState('all');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [tableViewMode, setTableViewMode] = useState('grid'); // 'grid' or 'floorplan'
   const [recentItems, setRecentItems] = useState([]);
   
   // Session Open State
@@ -867,7 +869,7 @@ const TableBillingPage = () => {
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Table Grid Section */}
       <section className="bg-white p-8 rounded-[40px] shadow-xl shadow-slate-200/50 border border-slate-100">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
             <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
                     <Grid3X3 size={20} />
@@ -883,15 +885,44 @@ const TableBillingPage = () => {
                     </button>
                 )}
             </div>
-            <div className="flex bg-slate-100/50 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-lg shadow-emerald-200 animate-pulse"></div>
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Available</span>
+            
+            <div className="flex flex-wrap items-center gap-4">
+                {/* View Mode Switcher */}
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1 border border-slate-200/50 dark:border-slate-700/50 shadow-inner">
+                    <button
+                        onClick={() => setTableViewMode('grid')}
+                        className={cn(
+                            "px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                            tableViewMode === 'grid' 
+                                ? "bg-white text-indigo-600 dark:bg-slate-900 shadow-sm" 
+                                : "text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                        )}
+                    >
+                        Grid View
+                    </button>
+                    <button
+                        onClick={() => setTableViewMode('floorplan')}
+                        className={cn(
+                            "px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                            tableViewMode === 'floorplan' 
+                                ? "bg-white text-indigo-600 dark:bg-slate-900 shadow-sm" 
+                                : "text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                        )}
+                    >
+                        Floor Plan View
+                    </button>
                 </div>
-                <div className="w-px h-4 bg-slate-200 self-center mx-1"></div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-lg shadow-amber-200"></div>
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Occupied</span>
+
+                <div className="flex bg-slate-100/50 dark:bg-slate-800/50 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-lg shadow-emerald-200 animate-pulse"></div>
+                        <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Available</span>
+                    </div>
+                    <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 self-center mx-1"></div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all">
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-lg shadow-amber-200"></div>
+                        <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Occupied</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -923,35 +954,44 @@ const TableBillingPage = () => {
             </div>
         )}
 
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 sm:gap-4">
-            {tables.map(table => (
-                <button
-                    key={table.id}
-                    onClick={() => handleSelectTable(table)}
-                    className={cn(
-                        "p-4 sm:p-6 rounded-[20px] sm:rounded-[24px] border-2 transition-all flex flex-col items-center group relative overflow-hidden",
-                        selectedTable?.id === table.id 
-                            ? "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-900/30" 
-                            : table.status === 'available' 
-                                ? "bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-500" 
-                                : "bg-amber-50 border-amber-200 text-amber-700 shadow-sm"
-                    )}
-                >
-                    <Utensils 
-                        size={selectedTable?.id === table.id ? 24 : 20} 
+        {tableViewMode === 'grid' ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 sm:gap-4">
+                {tables.map(table => (
+                    <button
+                        key={table.id}
+                        onClick={() => handleSelectTable(table)}
                         className={cn(
-                            "mb-2 sm:mb-3 transition-transform group-hover:scale-110", 
-                            selectedTable?.id === table.id ? "text-white" : table.status === 'available' ? "text-emerald-400" : "text-amber-400"
-                        )} 
-                    />
-                    <span className="font-black text-sm sm:text-lg">{table.table_no}</span>
-                    <span className={cn(
-                        "text-[7px] sm:text-[8px] font-black uppercase tracking-widest mt-1",
-                        selectedTable?.id === table.id ? "text-indigo-200" : table.status === 'available' ? "text-emerald-500" : "text-amber-600"
-                    )}>{table.status}</span>
-                </button>
-            ))}
-        </div>
+                            "p-4 sm:p-6 rounded-[20px] sm:rounded-[24px] border-2 transition-all flex flex-col items-center group relative overflow-hidden",
+                            selectedTable?.id === table.id 
+                                ? "bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-900/30" 
+                                : table.status === 'available' 
+                                    ? "bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-500 dark:bg-slate-900/40 dark:border-slate-800" 
+                                    : "bg-amber-50 border-amber-200 text-amber-700 shadow-sm dark:bg-slate-900/40 dark:border-slate-800"
+                        )}
+                    >
+                        <Utensils 
+                            size={selectedTable?.id === table.id ? 24 : 20} 
+                            className={cn(
+                                "mb-2 sm:mb-3 transition-transform group-hover:scale-110", 
+                                selectedTable?.id === table.id ? "text-white" : table.status === 'available' ? "text-emerald-400" : "text-amber-400"
+                            )} 
+                        />
+                        <span className="font-black text-sm sm:text-lg">{table.table_no}</span>
+                        <span className={cn(
+                            "text-[7px] sm:text-[8px] font-black uppercase tracking-widest mt-1",
+                            selectedTable?.id === table.id ? "text-indigo-200" : table.status === 'available' ? "text-emerald-500" : "text-amber-600"
+                        )}>{table.status}</span>
+                    </button>
+                ))}
+            </div>
+        ) : (
+            <FloorPlanMap 
+                tables={tables} 
+                isDesignerMode={false} 
+                onTableSelect={handleSelectTable} 
+                selectedTableId={selectedTable?.id} 
+            />
+        )}
       </section>
 
       {/* POS Area */}

@@ -8,7 +8,10 @@ import {
   Clock,
   ChevronDown,
   X,
-  WifiOff
+  WifiOff,
+  Sun,
+  Moon,
+  ConciergeBell
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Sidebar from './Sidebar';
@@ -19,6 +22,7 @@ import NotificationDropdown from '../common/NotificationDropdown';
 import UserMenu from './UserMenu';
 import { cn } from '../../utils/cn';
 import { useNetwork } from '../../hooks/useNetwork';
+import { initSocket, getSocket } from '../../api/socket';
 
 const DashboardLayout = () => {
   const { user } = useAuth();
@@ -28,6 +32,104 @@ const DashboardLayout = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentTime, setCurrentTime] = React.useState(new Date());
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
+  const [customerAlerts, setCustomerAlerts] = useState([]);
+  const [isAlertsDropdownOpen, setIsAlertsDropdownOpen] = useState(false);
+  const alertsDropdownRef = React.useRef(null);
+
+  const playAlertChime = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc1.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+      
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(293.66, ctx.currentTime);
+      osc2.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.15);
+      
+      gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+      
+      osc1.connect(gainNode);
+      osc2.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc1.start();
+      osc2.start();
+      
+      osc1.stop(ctx.currentTime + 0.8);
+      osc2.stop(ctx.currentTime + 0.8);
+    } catch (err) {
+      console.warn("Failed to play audio alert:", err);
+    }
+  };
+
+  React.useEffect(() => {
+    if (!user || !user.shop_id) return;
+    
+    const socket = initSocket(user.shop_id);
+    if (!socket) return;
+
+    const handleNewAlert = (alert) => {
+      playAlertChime();
+      setCustomerAlerts((prev) => {
+        if (prev.some((a) => a.id === alert.id)) return prev;
+        return [alert, ...prev];
+      });
+    };
+
+    const handleAlertResolved = (data) => {
+      setCustomerAlerts((prev) => prev.filter((a) => a.id !== data.alertId));
+    };
+
+    socket.on('new_customer_alert', handleNewAlert);
+    socket.on('customer_alert_resolved', handleAlertResolved);
+
+    return () => {
+      socket.off('new_customer_alert', handleNewAlert);
+      socket.off('customer_alert_resolved', handleAlertResolved);
+    };
+  }, [user]);
+
+  const handleResolveAlert = (alertId) => {
+    const socket = getSocket();
+    if (socket && user && user.shop_id) {
+      socket.emit('resolve_customer_alert', {
+        alertId: alertId,
+        shopId: user.shop_id
+      });
+    }
+    setCustomerAlerts((prev) => prev.filter((a) => a.id !== alertId));
+  };
+
+  // Click outside to close dropdown
+  React.useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (alertsDropdownRef.current && !alertsDropdownRef.current.contains(event.target)) {
+        setIsAlertsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  React.useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [theme]);
 
   React.useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -87,8 +189,92 @@ const DashboardLayout = () => {
                 </div>
             </div>
             
-            <LanguageSwitcher />
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="p-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors shadow-sm dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 flex items-center justify-center"
+              title="Toggle Theme"
+            >
+              {theme === 'dark' ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} />}
+            </button>
             
+            <LanguageSwitcher />
+
+            {/* Customer Real-time Alerts Badge & Dropdown */}
+            {user && (
+              <div className="relative" ref={alertsDropdownRef}>
+                <button
+                  onClick={() => setIsAlertsDropdownOpen(!isAlertsDropdownOpen)}
+                  className={cn(
+                    "p-2 lg:p-2.5 text-slate-400 hover:bg-slate-50 rounded-2xl transition-all relative group flex items-center justify-center",
+                    isAlertsDropdownOpen && "bg-slate-50 text-amber-600",
+                    customerAlerts.length > 0 && "text-amber-500 hover:text-amber-600"
+                  )}
+                  title="Customer Assistance Requests"
+                >
+                  <ConciergeBell size={20} className={cn(customerAlerts.length > 0 && "animate-bounce")} style={{ animationDuration: '2s' }} />
+                  {customerAlerts.length > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-4.5 h-4.5 bg-rose-500 border-2 border-white rounded-full flex items-center justify-center text-[8px] font-black text-white animate-pulse">
+                      {customerAlerts.length}
+                    </span>
+                  )}
+                </button>
+
+                {isAlertsDropdownOpen && (
+                  <div className="absolute right-0 mt-3 w-80 bg-white rounded-[32px] shadow-2xl border border-slate-100 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="p-6 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest">Customer Alerts</h3>
+                        <p className="text-[9px] text-slate-400 font-bold mt-0.5">Real-time table assistance</p>
+                      </div>
+                      {customerAlerts.length > 0 && (
+                        <span className="px-2 py-0.5 bg-amber-500 text-amber-950 text-[9px] font-black uppercase tracking-widest rounded-full">
+                          {customerAlerts.length} Active
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
+                      {customerAlerts.length > 0 ? (
+                        <div className="divide-y divide-slate-50">
+                          {customerAlerts.map((alert) => (
+                            <div key={alert.id} className="p-4 hover:bg-slate-50/60 transition-colors flex items-center justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[9px] font-black uppercase tracking-wider">
+                                    Table {alert.tableNo}
+                                  </span>
+                                  <span className="text-[9px] text-slate-450 font-medium">
+                                    {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  </span>
+                                </div>
+                                <p className="text-xs font-black text-slate-800">
+                                  {alert.action === 'Call Waiter' ? '🔔 Waiter Requested' : '💵 Bill Requested'}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleResolveAlert(alert.id)}
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[9px] uppercase tracking-widest rounded-xl transition-all shadow-md shadow-indigo-600/10 active:scale-95 shrink-0"
+                              >
+                                Resolve
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="py-10 px-6 text-center">
+                          <div className="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <ConciergeBell size={18} />
+                          </div>
+                          <h4 className="text-xs font-black text-slate-900 uppercase">No active requests</h4>
+                          <p className="text-[11px] text-slate-450 mt-1 font-medium italic">Tables are fully satisfied.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <NotificationDropdown />
             
             <UserMenu />

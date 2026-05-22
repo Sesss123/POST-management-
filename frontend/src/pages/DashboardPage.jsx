@@ -53,6 +53,58 @@ const DashboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [announcements, setAnnouncements] = useState([]);
+
+  // Phase 5: Neural AI Assistant States
+  const [aiDiagnosticState, setAiDiagnosticState] = useState('idle'); // 'idle', 'scanning', 'typing'
+  const [aiInsightText, setAiInsightText] = useState('');
+  const [currentInsightIndex, setCurrentInsightIndex] = useState(0);
+
+  const aiInsightsList = React.useMemo(() => {
+    const lowStockCount = stats?.lowStockItems?.length || 0;
+    return [
+      `⚠️ CRITICAL STOCK PROTOCOL: Low-stock threshold breached (${lowStockCount} items). Recommend initiating bulk supplier replenishments immediately to avoid order bottlenecks during peak rush hours.`,
+      `📊 INTENSITY ANALYSIS: Operations peak between 19:00 - 21:30. Real-time queue volume is projected to scale. Pre-cooking high-frequency starters will reduce preparation delay.`,
+      `💡 REVENUE VECTOR OUTLOOK: Liquid assets stream is showing positive momentum. Main course segment distribution remains the dominant margin driver. Recommend maintaining current item pricing configurations.`,
+      `🎯 OPERATIONS FEEDBACK: Customer tables QR alert metrics are active. Keep cashier terminal notifications responsive to maintain table request resolution times below 1.5 minutes.`
+    ];
+  }, [stats]);
+
+  const startAiScan = useCallback(() => {
+    setAiDiagnosticState('scanning');
+    setAiInsightText('');
+    
+    setTimeout(() => {
+      setAiDiagnosticState('typing');
+      setCurrentInsightIndex((prev) => (prev + 1) % aiInsightsList.length);
+    }, 2000);
+  }, [aiInsightsList]);
+
+  // Trigger initial scan when telemetry data is ready
+  useEffect(() => {
+    if (stats) {
+      startAiScan();
+    }
+  }, [stats, startAiScan]);
+
+  // Typing effect engine
+  useEffect(() => {
+    if (aiDiagnosticState !== 'typing') return;
+    
+    const targetText = aiInsightsList[currentInsightIndex];
+    let charIndex = 0;
+    
+    const typingInterval = setInterval(() => {
+      if (charIndex < targetText.length) {
+        setAiInsightText(targetText.slice(0, charIndex + 1));
+        charIndex++;
+      } else {
+        clearInterval(typingInterval);
+        setAiDiagnosticState('idle');
+      }
+    }, 20);
+
+    return () => clearInterval(typingInterval);
+  }, [aiDiagnosticState, currentInsightIndex, aiInsightsList]);
   
   const [dateRange, setDateRange] = useState({
       from: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -264,6 +316,63 @@ const DashboardPage = () => {
             </div>
         </div>
       </header>
+
+      {/* 01.5 NEURAL AI ASSISTANT DIAGNOSTICS */}
+      <div className="relative group overflow-hidden rounded-[40px] border border-slate-800/80 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-8 shadow-[0_20px_50px_rgba(99,102,241,0.25)] text-white">
+        {/* Glow Effects */}
+        <div className="absolute top-0 right-0 -mr-32 -mt-32 w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 -ml-32 -mb-32 w-[350px] h-[350px] bg-purple-500/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+        {/* Scan Bar animation when scanning */}
+        {aiDiagnosticState === 'scanning' && (
+          <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent shadow-[0_0_20px_rgba(99,102,241,0.8)] opacity-70 animate-scan pointer-events-none"></div>
+        )}
+
+        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-6 flex-1 min-w-0">
+            <div className={cn(
+              "w-16 h-16 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 border border-indigo-500/30 rounded-2xl flex items-center justify-center shrink-0 shadow-2xl relative",
+              aiDiagnosticState === 'scanning' && "animate-pulse"
+            )}>
+              <Brain className={cn("text-indigo-400 w-8 h-8", aiDiagnosticState === 'scanning' ? "animate-pulse" : "animate-spin-slow")} />
+              {aiDiagnosticState === 'scanning' && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                </span>
+              )}
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-400">Cognitive Neural Assistant</span>
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Diagnostics: {aiDiagnosticState.toUpperCase()}</span>
+              </div>
+              
+              <div className="min-h-[50px] font-mono text-sm leading-relaxed text-indigo-100 flex items-start gap-1">
+                {aiDiagnosticState === 'scanning' ? (
+                  <span className="text-slate-400 italic animate-pulse">Running heuristic operations... Scanning inventory metrics, kitchen cues, and cash balances...</span>
+                ) : (
+                  <p className="font-mono">
+                    {aiInsightText}
+                    {aiDiagnosticState === 'typing' && <span className="w-2.5 h-4 bg-indigo-400 animate-blink inline-block ml-1 align-middle"></span>}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <button
+            disabled={aiDiagnosticState !== 'idle'}
+            onClick={startAiScan}
+            className="px-6 py-3.5 bg-white/5 hover:bg-white/10 active:scale-95 transition-all text-[10px] font-black uppercase tracking-[0.25em] text-indigo-300 border border-white/10 hover:border-indigo-500/30 rounded-2xl flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl shrink-0"
+          >
+            <Sparkles size={14} className="text-indigo-400" />
+            Refresh Intelligence
+          </button>
+        </div>
+      </div>
 
       {/* 02. KPI MATRIX BENTO */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

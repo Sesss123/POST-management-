@@ -5,3 +5,6 @@
     at Timeout._onTimeout (C:\Users\sehas\.gemini\antigravity\scratch\Anju ayya\RestoLedger-POS\backend\node_modules\node-cron\dist\cjs\scheduler\runner.js:70:55)
     at listOnTimeout (node:internal/timers:594:17)
     at process.processTimers (node:internal/timers:529:7)
+2026-05-18 00:42:27 [ERROR]: Failed to send email to pathiranasehas676@gmail.com: Missing credentials for "PLAIN"
+2026-05-18 00:42:44 [ERROR]: Failed to send email to pathiranasehas676@gmail.com: Missing credentials for "PLAIN"
+2026-05-18 00:43:11 [ERROR]: Failed to send email to pathiranasehas676@gmail.com: Missing credentials for "PLAIN"

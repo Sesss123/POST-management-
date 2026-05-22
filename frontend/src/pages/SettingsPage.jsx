@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { settingApi } from '../api/api';
+import { settingApi, authApi } from '../api/api';
 import { 
   Settings, 
   Store, 
@@ -39,6 +39,8 @@ const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('business');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [securityForm, setSecurityForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [securityLoading, setSecurityLoading] = useState(false);
 
   const tabs = [
     { id: 'business', label: 'Business Info', icon: Store },
@@ -109,6 +111,33 @@ const SettingsPage = () => {
     }
   };
 
+  const handleSecuritySubmit = async (e) => {
+    e.preventDefault();
+    if (securityForm.newPassword !== securityForm.confirmPassword) {
+        toast.error('New passwords do not match');
+        return;
+    }
+    if (securityForm.newPassword.length < 6) {
+        toast.error('New password must be at least 6 characters');
+        return;
+    }
+    setSecurityLoading(true);
+    try {
+        const { data } = await authApi.changePassword({
+            currentPassword: securityForm.currentPassword,
+            newPassword: securityForm.newPassword
+        });
+        if (data.success) {
+            toast.success('Password updated successfully');
+            setSecurityForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        }
+    } catch (err) {
+        toast.error(err.response?.data?.message || 'Failed to update password');
+    } finally {
+        setSecurityLoading(false);
+    }
+  };
+
   if (loading) return (
     <div className="h-full flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -164,20 +193,70 @@ const SettingsPage = () => {
                                 title={tab.label} 
                                 icon={tab.icon}
                                 headerAction={
-                                    <AppButton 
-                                        size="sm" 
-                                        variant="primary" 
-                                        icon={Save} 
-                                        onClick={() => handleSaveSection(tab.id)}
-                                        loading={saving}
-                                        className="px-6 rounded-xl"
-                                    >
-                                        Save {tab.label}
-                                    </AppButton>
+                                    tab.id !== 'security' && tab.id !== 'permissions' && (
+                                        <AppButton 
+                                            size="sm" 
+                                            variant="primary" 
+                                            icon={Save} 
+                                            onClick={() => handleSaveSection(tab.id)}
+                                            loading={saving}
+                                            className="px-6 rounded-xl"
+                                        >
+                                            Save {tab.label}
+                                        </AppButton>
+                                    )
                                 }
                             >
                                 {tab.id === 'permissions' ? (
                                     <PermissionsTab />
+                                ) : tab.id === 'security' ? (
+                                    <form onSubmit={handleSecuritySubmit} className="space-y-8 max-w-xl p-4">
+                                        <div className="space-y-6">
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current Password</label>
+                                                <FormInput 
+                                                    type="password"
+                                                    required
+                                                    value={securityForm.currentPassword}
+                                                    onChange={(e) => setSecurityForm({ ...securityForm, currentPassword: e.target.value })}
+                                                    placeholder="Enter your current password"
+                                                    className="bg-slate-50 border-slate-100 focus:bg-white h-14 rounded-2xl"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">New Password</label>
+                                                <FormInput 
+                                                    type="password"
+                                                    required
+                                                    value={securityForm.newPassword}
+                                                    onChange={(e) => setSecurityForm({ ...securityForm, newPassword: e.target.value })}
+                                                    placeholder="Enter your new password"
+                                                    className="bg-slate-50 border-slate-100 focus:bg-white h-14 rounded-2xl"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Confirm New Password</label>
+                                                <FormInput 
+                                                    type="password"
+                                                    required
+                                                    value={securityForm.confirmPassword}
+                                                    onChange={(e) => setSecurityForm({ ...securityForm, confirmPassword: e.target.value })}
+                                                    placeholder="Retype your new password"
+                                                    className="bg-slate-50 border-slate-100 focus:bg-white h-14 rounded-2xl"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="pt-4">
+                                            <AppButton
+                                                type="submit"
+                                                variant="primary"
+                                                loading={securityLoading}
+                                                className="px-10 py-4 rounded-2xl font-black uppercase text-xs tracking-widest bg-indigo-600 hover:bg-indigo-500 shadow-xl shadow-indigo-100"
+                                            >
+                                                Update Password
+                                            </AppButton>
+                                        </div>
+                                    </form>
                                 ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-2">
                                         {Object.entries(groupedSettings[tab.id] || {}).map(([key, setting]) => (

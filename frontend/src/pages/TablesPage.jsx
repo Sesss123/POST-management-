@@ -3,6 +3,8 @@ import { tableApi } from '../api/api';
 import { Grid3X3, Plus, Utensils, QrCode } from 'lucide-react';
 import { AppButton, AppCard, StatusBadge, AppModal, FormInput, useToast } from '../components/ui';
 import TableQRCodeModal from '../components/tables/TableQRCodeModal';
+import FloorPlanMap from '../components/tables/FloorPlanMap';
+import { cn } from '../utils/cn';
 
 const TablesPage = () => {
   const toast = useToast();
@@ -12,6 +14,7 @@ const TablesPage = () => {
   const [formData, setFormData] = useState({ table_no: '' });
   
   const [qrModal, setQrModal] = useState({ show: false, table: null });
+  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'layout'
 
   useEffect(() => {
     fetchTables();
@@ -56,40 +59,70 @@ const TablesPage = () => {
         <AppButton icon={Plus} size="lg" className="w-full sm:w-auto uppercase tracking-widest text-[10px] lg:text-xs font-black" onClick={() => setShowModal(true)}>Add New Table</AppButton>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {tables.map(table => (
-              <AppCard key={table.id} className="group hover:border-indigo-600 transition-all">
-                  <div className="flex flex-col items-center text-center">
-                      <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300 mb-4 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                          <Utensils size={32} />
-                      </div>
-                      <h3 className="text-2xl font-black text-slate-900 mb-1">Table {table.table_no}</h3>
-                      <StatusBadge status={table.status} className="mb-4" />
-                      
-                      <div className="w-full pt-4 border-t border-slate-50 flex flex-col gap-3">
-                          <div className="flex justify-between items-center px-2">
-                             <div className="text-left">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Status</p>
-                                <p className="text-xs font-bold text-slate-600 uppercase tracking-tighter">{table.status}</p>
-                             </div>
-                             <button 
-                                onClick={() => setQrModal({ show: true, table: table })}
-                                className="p-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
-                                title="Digital Menu QR"
-                             >
-                                <QrCode size={18} />
-                             </button>
-                          </div>
-                      </div>
-                  </div>
-              </AppCard>
-          ))}
-          {tables.length === 0 && !loading && (
-              <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-200 rounded-[40px]">
-                  <p className="text-slate-400 font-bold italic">No tables configured yet</p>
-              </div>
+      {/* View Switcher */}
+      <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl w-fit gap-1 border border-slate-200/50 dark:border-slate-700/50 shadow-inner">
+        <button
+          onClick={() => setViewMode('grid')}
+          className={cn(
+            "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+            viewMode === 'grid' 
+              ? "bg-white text-indigo-600 dark:bg-slate-900 shadow-md" 
+              : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
           )}
+        >
+          Grid View
+        </button>
+        <button
+          onClick={() => setViewMode('layout')}
+          className={cn(
+            "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+            viewMode === 'layout' 
+              ? "bg-white text-indigo-600 dark:bg-slate-900 shadow-md" 
+              : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
+          )}
+        >
+          Layout Designer
+        </button>
       </div>
+
+      {viewMode === 'grid' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {tables.map(table => (
+                <AppCard key={table.id} className="group hover:border-indigo-600 transition-all">
+                    <div className="flex flex-col items-center text-center">
+                        <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300 mb-4 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                            <Utensils size={32} />
+                        </div>
+                        <h3 className="text-2xl font-black text-slate-900 mb-1">Table {table.table_no}</h3>
+                        <StatusBadge status={table.status} className="mb-4" />
+                        
+                        <div className="w-full pt-4 border-t border-slate-50 flex flex-col gap-3">
+                            <div className="flex justify-between items-center px-2">
+                               <div className="text-left">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Status</p>
+                                  <p className="text-xs font-bold text-slate-600 uppercase tracking-tighter">{table.status}</p>
+                               </div>
+                               <button 
+                                  onClick={() => setQrModal({ show: true, table: table })}
+                                  className="p-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                  title="Digital Menu QR"
+                               >
+                                  <QrCode size={18} />
+                               </button>
+                            </div>
+                        </div>
+                    </div>
+                </AppCard>
+            ))}
+            {tables.length === 0 && !loading && (
+                <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-200 rounded-[40px]">
+                    <p className="text-slate-400 font-bold italic">No tables configured yet</p>
+                </div>
+            )}
+        </div>
+      ) : (
+        <FloorPlanMap tables={tables} isDesignerMode={true} />
+      )}
 
       <AppModal
         isOpen={showModal}

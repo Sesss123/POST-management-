@@ -262,3 +262,7 @@ export const superAdminApi = {
     updateUserStatus: (id, status) => apiClient.patch(`/super-admin/users/${id}/status`, { status }),
     resetUserPassword: (id, password) => apiClient.post(`/super-admin/users/${id}/reset-password`, { password })
 };
+
+export const authApi = {
+    changePassword: (data) => apiClient.post('/auth/change-password', data)
+};

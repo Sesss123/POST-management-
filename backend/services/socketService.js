@@ -31,6 +31,38 @@ const init = (server) => {
         socket.on('disconnect', () => {
             console.log(`Socket disconnected: ${socket.id}`);
         });
+
+        // Listen for real-time customer alerts (Call Waiter / Request Bill) from QR menu
+        socket.on('customer_alert', (data) => {
+            // data format: { tableNo, action, shopId }
+            if (data && data.shopId) {
+                const alertId = Math.random().toString(36).substring(2, 11);
+                const alertPayload = {
+                    id: alertId,
+                    tableNo: data.tableNo || 'N/A',
+                    action: data.action, // e.g., 'Call Waiter' or 'Request Bill'
+                    shopId: data.shopId,
+                    timestamp: new Date().toISOString(),
+                    resolved: false
+                };
+                
+                // Broadcast to everyone in the shop room
+                io.to(`shop_${data.shopId}`).emit('new_customer_alert', alertPayload);
+                console.log(`[Socket] Customer alert broadcast:`, alertPayload);
+            }
+        });
+
+        // Listen for alert resolution from dashboard/staff
+        socket.on('resolve_customer_alert', (data) => {
+            // data format: { alertId, shopId }
+            if (data && data.shopId && data.alertId) {
+                io.to(`shop_${data.shopId}`).emit('customer_alert_resolved', {
+                    alertId: data.alertId,
+                    shopId: data.shopId
+                });
+                console.log(`[Socket] Resolved alert ${data.alertId} for shop ${data.shopId}`);
+            }
+        });
     });
 
     return io;

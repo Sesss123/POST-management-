@@ -209,6 +209,11 @@ const SuperAdminUsersPage = () => {
                       <div>
                         <p className="text-sm font-bold text-white">{user.name}</p>
                         <p className="text-xs text-slate-500">{user.email}</p>
+                        {user.temp_password && (
+                          <p className="text-[10px] text-indigo-400 font-bold uppercase mt-1">
+                            Key: <span className="font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded select-all">{user.temp_password}</span>
+                          </p>
+                        )}
                       </div>
                     </div>
                   </td>

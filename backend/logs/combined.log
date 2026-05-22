@@ -169,3 +169,18 @@
 2026-05-17 23:33:50 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
 2026-05-17 23:34:24 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
 2026-05-17 23:34:39 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-17 23:36:46 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:04:32 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:04:44 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:14:12 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:14:48 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:16:41 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:16:50 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:34:16 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:40:11 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:40:22 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:41:45 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:41:59 [INFO]: Subscription Reminder Service: Scheduled for 09:00 daily
+2026-05-18 00:42:27 [ERROR]: Failed to send email to pathiranasehas676@gmail.com: Missing credentials for "PLAIN"
+2026-05-18 00:42:44 [ERROR]: Failed to send email to pathiranasehas676@gmail.com: Missing credentials for "PLAIN"
+2026-05-18 00:43:11 [ERROR]: Failed to send email to pathiranasehas676@gmail.com: Missing credentials for "PLAIN"

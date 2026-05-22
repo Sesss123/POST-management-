@@ -115,6 +115,7 @@ exports.getMenuByTable = async (req, res) => {
         }
 
         const restaurantInfo = {
+            id: shopId, // Added to identify the shop room for real-time customer alerts
             name: settings['restaurant_name'] || shopName,
             address: settings['restaurant_address'] || '',
             phone: settings['restaurant_phone'] || '',

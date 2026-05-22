@@ -35,7 +35,11 @@ import {
     Package,
     Megaphone,
     Grid3X3,
-    Clock
+    Clock,
+    Fingerprint,
+    Lock,
+    Key,
+    Copy
 } from 'lucide-react';
 import api from '../../api/apiClient';
 import { useToast } from '../../components/ui/Feedback';
@@ -87,6 +91,7 @@ const ShopDetailsPage = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [showAdminModal, setShowAdminModal] = useState(false);
+    const [showCredentialsModal, setShowCredentialsModal] = useState(false);
     const [adminFormData, setAdminFormData] = useState({ name: '', email: '', password: '' });
     const [adminLoading, setAdminLoading] = useState(false);
     const [isEditingTechnical, setIsEditingTechnical] = useState(false);
@@ -260,6 +265,13 @@ const ShopDetailsPage = () => {
 
                     <div className="flex flex-wrap gap-4">
                         <button 
+                            onClick={() => navigate(`/super-admin/shops/${identifier}/governance`)}
+                            className="flex items-center gap-3 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs tracking-widest uppercase border border-indigo-500/20 transition-all active:scale-95 shadow-xl shadow-indigo-600/10"
+                        >
+                            <CreditCard size={20} className="text-indigo-200" />
+                            Governance
+                        </button>
+                        <button 
                             onClick={() => navigate(`/super-admin/shops/${identifier}/modules`)}
                             className="flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-[2rem] font-black text-xs tracking-widest uppercase border border-white/10 transition-all active:scale-95"
                         >
@@ -272,6 +284,13 @@ const ShopDetailsPage = () => {
                         >
                             <UserPlus size={20} className="text-indigo-400" />
                             Add Admin
+                        </button>
+                        <button 
+                            onClick={() => setShowCredentialsModal(true)}
+                            className="flex items-center gap-3 px-8 py-4 bg-purple-600/15 hover:bg-purple-600 border border-purple-500/20 text-purple-400 hover:text-white rounded-[2rem] font-black text-xs tracking-widest uppercase transition-all active:scale-95 shadow-xl hover:shadow-purple-600/20"
+                        >
+                            <Fingerprint size={20} />
+                            Credentials
                         </button>
                         {shop.status === 'active' ? (
                             <button 
@@ -704,6 +723,79 @@ const ShopDetailsPage = () => {
                     </div>
                 </div>
             </AppModal>
+
+            {/* Premium Credentials Modal */}
+            {showCredentialsModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl">
+                    <div className="bg-slate-900 border border-white/10 rounded-[3.5rem] w-full max-w-xl p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-500 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/5 blur-[80px] rounded-full -mr-32 -mt-32" />
+                        
+                        <div className="relative flex items-center gap-6 mb-10">
+                            <div className="w-20 h-20 bg-purple-500/10 text-purple-400 rounded-[2rem] flex items-center justify-center border border-purple-500/20 shadow-2xl">
+                                <Fingerprint size={36} />
+                            </div>
+                            <div>
+                                <h3 className="text-3xl font-black text-white tracking-tight">Active Credentials</h3>
+                                <p className="text-slate-400 font-medium text-sm mt-1">Primary owner credentials assigned during node provisioning.</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-6 relative z-10">
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">Owner Username (Email)</label>
+                                <div className="bg-slate-950/50 border border-white/10 rounded-[2rem] p-6 text-white font-mono text-lg flex items-center justify-between select-all group">
+                                    <span>{shop?.email || `admin@${shop?.identifier}.com`}</span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">Access Password (temp)</label>
+                                <div className="bg-slate-950/50 border border-white/10 rounded-[2rem] p-6 text-indigo-400 font-mono text-lg flex items-center justify-between select-all group">
+                                    <span>{shop?.temp_password || 'Not Set'}</span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">Direct Login URL</label>
+                                <div className="bg-slate-950/50 border border-white/10 rounded-[2rem] p-6 font-mono text-sm flex items-center justify-between">
+                                    <a 
+                                        href={window.location.origin + '/login'} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="text-slate-400 hover:text-white transition-colors underline break-all"
+                                    >
+                                        {window.location.origin + '/login'}
+                                    </a>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-6 pt-6">
+                                <button 
+                                    type="button"
+                                    onClick={() => setShowCredentialsModal(false)}
+                                    className="flex-1 py-5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-[2rem] font-black uppercase text-xs tracking-widest transition-all active:scale-95 border border-white/5"
+                                >
+                                    Close
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => {
+                                        const username = shop?.email || `admin@${shop?.identifier}.com`;
+                                        const password = shop?.temp_password || 'Not Set';
+                                        const loginUrl = window.location.origin + '/login';
+                                        const text = `Shop: ${shop?.name}\nUsername/Email: ${username}\nPassword: ${password}\nLogin URL: ${loginUrl}`;
+                                        navigator.clipboard.writeText(text);
+                                        showToast('Credentials copied!', 'success');
+                                    }}
+                                    className="flex-1 py-5 bg-purple-600 hover:bg-purple-500 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest transition-all active:scale-95 shadow-xl shadow-purple-600/20"
+                                >
+                                    Copy Credentials
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

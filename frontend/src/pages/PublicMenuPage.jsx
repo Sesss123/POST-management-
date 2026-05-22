@@ -4,13 +4,15 @@ import axios from 'axios';
 import { 
     Search, Utensils, Info, Phone, MapPin, 
     ChevronRight, Star, Flame, Leaf, ArrowLeft, 
-    X, Grid, List as ListIcon, Filter, Clock
+    X, Grid, List as ListIcon, Filter, Clock,
+    Bell, Receipt
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../components/common/LanguageSwitcher';
 
 import { API_BASE_URL } from '../api/config';
+import { initSocket, getSocket } from '../api/socket';
 
 const PublicMenuPage = () => {
     const { t, i18n } = useTranslation();
@@ -20,6 +22,40 @@ const PublicMenuPage = () => {
     const [search, setSearch] = useState('');
     const [activeCategory, setActiveCategory] = useState('All');
     const [selectedItem, setSelectedItem] = useState(null);
+    const [alertMenuOpen, setAlertMenuOpen] = useState(false);
+    const [alertSending, setAlertSending] = useState(false);
+    const [alertSent, setAlertSent] = useState(null);
+
+    // Initialize socket client when menu data is loaded
+    useEffect(() => {
+        if (menuData && menuData.restaurant && menuData.restaurant.id) {
+            initSocket(menuData.restaurant.id);
+        }
+    }, [menuData]);
+
+    const handleSendAlert = (action) => {
+        if (!tableNo || !menuData?.restaurant?.id) return;
+        const socket = getSocket();
+        if (!socket) {
+            console.error('Socket not initialized');
+            return;
+        }
+        setAlertSending(true);
+        socket.emit('customer_alert', {
+            tableNo: tableNo,
+            action: action,
+            shopId: menuData.restaurant.id
+        });
+
+        setTimeout(() => {
+            setAlertSending(false);
+            setAlertSent(action);
+            setAlertMenuOpen(false);
+            setTimeout(() => {
+                setAlertSent(null);
+            }, 5000);
+        }, 800);
+    };
 
     useEffect(() => {
         fetchMenu();
@@ -468,6 +504,95 @@ const PublicMenuPage = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Real-time Customer Alert Floating System */}
+            {tableNo && (
+                <>
+                    {/* Floating Bell Button */}
+                    <div className="fixed bottom-28 right-6 z-[70] md:right-12">
+                        <button
+                            onClick={() => setAlertMenuOpen(!alertMenuOpen)}
+                            className="w-14 h-14 bg-gradient-to-br from-amber-400 to-amber-600 text-white rounded-full flex items-center justify-center shadow-[0_8px_30px_rgb(245,158,11,0.4)] hover:scale-110 active:scale-95 transition-all duration-300 relative group animate-bounce"
+                            style={{ animationDuration: '3s' }}
+                        >
+                            <span className="absolute -inset-1 bg-amber-500 rounded-full blur opacity-30 group-hover:opacity-50 transition-opacity animate-pulse"></span>
+                            <Bell className="relative z-10 w-6 h-6 animate-pulse" />
+                        </button>
+                    </div>
+
+                    {/* Success Toast */}
+                    {alertSent && (
+                        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[110] w-[90%] max-w-sm bg-stone-900 text-white p-4 rounded-3xl shadow-2xl border border-amber-500/20 flex items-center gap-3 animate-in slide-in-from-top duration-300">
+                            <div className="w-10 h-10 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center flex-shrink-0">
+                                <Bell className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1">
+                                <p className="text-[10px] text-amber-500 font-black uppercase tracking-widest">Alert Sent</p>
+                                <p className="text-xs font-bold mt-0.5">
+                                    Staff notified: <span className="text-amber-400">"{alertSent}"</span> for Table {tableNo}
+                                </p>
+                            </div>
+                            <button onClick={() => setAlertSent(null)} className="text-white/40 hover:text-white transition-colors">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Alert Selector Sheet */}
+                    {alertMenuOpen && (
+                        <div className="fixed inset-0 z-[80] flex items-end justify-center p-0">
+                            <div 
+                                className="absolute inset-0 bg-stone-900/60 backdrop-blur-md animate-in fade-in duration-300"
+                                onClick={() => setAlertMenuOpen(false)}
+                            ></div>
+                            <div className="relative w-full max-w-md bg-white rounded-t-[40px] p-8 shadow-2xl border-t border-stone-100 animate-in slide-in-from-bottom duration-300">
+                                <div className="w-12 h-1.5 bg-stone-200 rounded-full mx-auto mb-6"></div>
+                                
+                                <div className="text-center mb-6">
+                                    <div className="w-16 h-16 bg-amber-50 rounded-[24px] flex items-center justify-center mx-auto mb-3 text-amber-600">
+                                        <Bell className="w-8 h-8" />
+                                    </div>
+                                    <h3 className="text-xl font-black text-stone-900 tracking-tight uppercase">Assistance Terminal</h3>
+                                    <p className="text-stone-500 text-xs italic mt-1 font-medium">Need help? Select an option below for instant staff response</p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <button
+                                        disabled={alertSending}
+                                        onClick={() => handleSendAlert('Call Waiter')}
+                                        className="w-full bg-gradient-to-r from-stone-900 to-stone-800 hover:from-rose-950 hover:to-rose-900 text-white py-4 px-6 rounded-[24px] font-black uppercase tracking-widest text-xs flex items-center justify-between shadow-xl active:scale-[0.98] transition-all disabled:opacity-50"
+                                    >
+                                        <span className="flex items-center gap-3 font-black">
+                                            <Bell className="w-4 h-4 text-amber-500" />
+                                            Call Waiter
+                                        </span>
+                                        <span className="text-[9px] text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full uppercase tracking-wider">Real-time</span>
+                                    </button>
+
+                                    <button
+                                        disabled={alertSending}
+                                        onClick={() => handleSendAlert('Request Bill')}
+                                        className="w-full bg-white hover:bg-stone-50 text-stone-950 py-4 px-6 rounded-[24px] font-black uppercase tracking-widest text-xs flex items-center justify-between border-2 border-stone-100 shadow-sm active:scale-[0.98] transition-all disabled:opacity-50"
+                                    >
+                                        <span className="flex items-center gap-3 font-black">
+                                            <Receipt className="w-4 h-4 text-stone-500" />
+                                            Request Bill
+                                        </span>
+                                        <span className="text-[9px] text-stone-400 font-bold uppercase tracking-wider">POS Connect</span>
+                                    </button>
+                                </div>
+
+                                <button
+                                    onClick={() => setAlertMenuOpen(false)}
+                                    className="w-full text-center text-stone-400 hover:text-stone-600 text-xs font-black uppercase tracking-widest mt-6 pt-4 border-t border-stone-50 block transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
         </div>
     );
 };

@@ -53,6 +53,7 @@ const CreateShopPage = () => {
     const { showToast } = useToast();
     const navigate = useNavigate();
     const [shops, setShops] = useState([]);
+    const [credentials, setCredentials] = useState(null);
 
     React.useEffect(() => {
         const fetchShops = async () => {
@@ -150,7 +151,12 @@ const CreateShopPage = () => {
             const { data } = await superAdminApi.createShop(form);
             if (data.success) {
                 showToast(`Shop "${form.name}" provisioned successfully!`, 'success');
-                navigate('/super-admin/shops');
+                setCredentials({
+                    name: form.name,
+                    admin_email: form.admin_email,
+                    admin_password: form.admin_password,
+                    login_url: window.location.origin + '/login'
+                });
             }
         } catch (err) {
             const msg = err.response?.data?.message || 'Failed to create shop. Please try again.';
@@ -304,14 +310,48 @@ const CreateShopPage = () => {
                     <div className="bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-[3.5rem] p-12 space-y-10 relative overflow-hidden group/card">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/5 blur-[100px] rounded-full -mr-32 -mt-32 group-hover/card:bg-purple-600/10 transition-all duration-1000" />
                         
-                        <div className="flex items-center gap-5 relative z-10">
-                            <div className="w-14 h-14 rounded-2xl bg-purple-500/10 flex items-center justify-center border border-purple-500/20 text-purple-400 shadow-2xl">
-                                <ShieldCheck size={28} />
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5 relative z-10">
+                            <div className="flex items-center gap-5">
+                                <div className="w-14 h-14 rounded-2xl bg-purple-500/10 flex items-center justify-center border border-purple-500/20 text-purple-400 shadow-2xl">
+                                    <ShieldCheck size={28} />
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-black text-white tracking-tight">Root Authority</h2>
+                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Super Admin Account Provisioning</p>
+                                </div>
                             </div>
-                            <div>
-                                <h2 className="text-2xl font-black text-white tracking-tight">Root Authority</h2>
-                                <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Super Admin Account Provisioning</p>
-                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const slug = form.identifier || toSlug(form.name) || 'shop';
+                                    const randomDigits = Math.floor(10000 + Math.random() * 90000);
+                                    
+                                    // Make clean capitalized prefix for password
+                                    const rawPrefix = form.name.trim().replace(/[^a-zA-Z]/g, '') || 'Tasty';
+                                    const capitalizedPrefix = rawPrefix.charAt(0).toUpperCase() + rawPrefix.slice(1, 8).toLowerCase();
+                                    
+                                    setForm(p => ({
+                                        ...p,
+                                        admin_name: p.admin_name || 'Root Admin',
+                                        admin_email: `admin@${slug}.com`,
+                                        admin_password: `${capitalizedPrefix}${randomDigits}`
+                                    }));
+                                    
+                                    // Clear administrative errors
+                                    setErrors(p => ({
+                                        ...p,
+                                        admin_name: '',
+                                        admin_email: '',
+                                        admin_password: ''
+                                    }));
+                                    
+                                    showToast('Root credentials auto-generated!', 'success');
+                                }}
+                                className="inline-flex items-center gap-2 px-5 py-3.5 bg-purple-600/10 hover:bg-purple-600 text-purple-400 hover:text-white border border-purple-500/20 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-xl hover:shadow-purple-600/20"
+                            >
+                                <Zap size={14} />
+                                Auto-Generate Credentials
+                            </button>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
@@ -540,6 +580,69 @@ const CreateShopPage = () => {
                     </div>
                 </div>
             </form>
+
+            {credentials && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl">
+                    <div className="bg-slate-900 border border-white/10 rounded-[3.5rem] w-full max-w-xl p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-500 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/5 blur-[80px] rounded-full -mr-32 -mt-32" />
+                        
+                        <div className="relative flex items-center gap-6 mb-10">
+                            <div className="w-20 h-20 bg-indigo-500/10 text-indigo-400 rounded-[2rem] flex items-center justify-center border border-indigo-500/20 shadow-2xl">
+                                <ShieldCheck size={36} className="animate-bounce" />
+                            </div>
+                            <div>
+                                <h3 className="text-3xl font-black text-white tracking-tight">Instance Active</h3>
+                                <p className="text-slate-400 font-medium text-lg mt-1">Credentials generated successfully.</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-6 relative z-10 bg-slate-950/50 p-8 rounded-3xl border border-white/5">
+                            <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shop Name</p>
+                                <p className="text-lg font-black text-white">{credentials.name}</p>
+                            </div>
+                            <hr className="border-white/5" />
+                            <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner Email (Username)</p>
+                                <p className="text-lg font-black text-white select-all">{credentials.admin_email}</p>
+                            </div>
+                            <hr className="border-white/5" />
+                            <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Initial Password</p>
+                                <p className="text-lg font-mono font-black text-indigo-400 select-all">{credentials.admin_password}</p>
+                            </div>
+                            <hr className="border-white/5" />
+                            <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Login URL</p>
+                                <a href={credentials.login_url} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-slate-400 hover:text-white transition-colors underline break-all">
+                                    {credentials.login_url}
+                                </a>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-6 pt-10">
+                            <button 
+                                type="button"
+                                onClick={async () => {
+                                    const text = `Shop: ${credentials.name}\nUsername/Email: ${credentials.admin_email}\nPassword: ${credentials.admin_password}\nLogin URL: ${credentials.login_url}`;
+                                    await navigator.clipboard.writeText(text);
+                                    showToast('Copied to clipboard!', 'success');
+                                }}
+                                className="flex-1 py-5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-[2rem] font-black uppercase text-xs tracking-widest transition-all border border-white/5"
+                            >
+                                Copy Credentials
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={() => navigate('/super-admin/shops')}
+                                className="flex-1 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl shadow-indigo-900/40 transition-all"
+                            >
+                                Go to Shops
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

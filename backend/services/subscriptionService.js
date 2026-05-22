@@ -70,7 +70,7 @@ const logSubscriptionAction = async (connection, {
  * Record a payment and extend subscription
  */
 const markPaymentReceived = async (shopId, payload, userId) => {
-    const { amount, payment_method, reference_no, months = 1, note } = payload;
+    const { amount, payment_method, reference_no, months = 1, note, plan } = payload;
     const connection = await db.getConnection();
 
     try {
@@ -96,16 +96,23 @@ const markPaymentReceived = async (shopId, payload, userId) => {
         newGraceUntil.setDate(newGraceUntil.getDate() + graceDays);
 
         // 1. Update Shop
-        await connection.query(
-            `UPDATE shops SET
+        let query = `UPDATE shops SET
                 subscription_status   = 'active',
                 subscription_end_date = ?,
                 grace_until           = ?,
                 last_payment_date     = CURRENT_TIMESTAMP,
-                locked_at             = NULL
-             WHERE id = ?`,
-            [newEndDate, newGraceUntil, shopId]
-        );
+                locked_at             = NULL`;
+        const params = [newEndDate, newGraceUntil];
+        
+        if (plan) {
+            query += `, subscription_plan = ?`;
+            params.push(plan);
+        }
+        
+        query += ` WHERE id = ?`;
+        params.push(shopId);
+
+        await connection.query(query, params);
 
         // 2. Create Payment Record
         const payUuid = generateUuid();
