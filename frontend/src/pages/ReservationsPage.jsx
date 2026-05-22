@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
     Calendar as CalendarIcon, 
     Plus, 
@@ -17,10 +18,11 @@ import {
     StickyNote
 } from 'lucide-react';
 import { reservationApi, tableApi } from '../api/api';
-import { useToast } from '../components/ui';
+import { useToast, AppButton } from '../components/ui';
 import { cn } from '../utils/cn';
 
 const ReservationsPage = () => {
+    const navigate = useNavigate();
     const toast = useToast();
     const [reservations, setReservations] = useState([]);
     const [tables, setTables] = useState([]);

@@ -21,6 +21,7 @@ router.get('/shops', saController.getShops);
 router.post('/shops', saController.createShop);
 router.get('/shops/:identifier', saController.getShopById);
 router.put('/shops/:id', saController.updateShop);
+router.delete('/shops/:id', saController.deleteShop);
 router.patch('/shops/:id/status', saController.updateShopStatus);
 router.patch('/shops/:id/delivery-permission', saController.updateDeliveryPermission);
 router.patch('/shops/:id/feature-permission', saController.updateFeaturePermission);

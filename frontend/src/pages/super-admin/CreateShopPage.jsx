@@ -3,7 +3,7 @@ import {
     ArrowLeft, Store, User, Mail, Lock, CheckCircle2,
     Loader2, ShieldAlert, Globe, AlertCircle, Eye, EyeOff,
     Zap, Sparkles, Database, Layers, Copy, List, Trash2,
-    LayoutGrid, ChevronRight, Fingerprint, ShieldCheck, Smartphone
+    LayoutGrid, ChevronRight, Fingerprint, ShieldCheck, Smartphone, X
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { superAdminApi } from '../../api/api';
@@ -32,7 +32,7 @@ const Field = ({ label, error, children, hint }) => (
 const Input = ({ icon: Icon, error, className, ...props }) => (
     <div className="relative group/input">
         {Icon && <Icon className={cn(
-            "absolute left-5 top-1/2 -translate-y-1/2 transition-colors duration-300",
+            "absolute left-5 top-1/2 -translate-y-1/2 transition-colors duration-300 z-10",
             error ? "text-rose-500" : "text-slate-500 group-focus-within/input:text-indigo-400"
         )} size={18} />}
         <input
@@ -153,8 +153,12 @@ const CreateShopPage = () => {
                 showToast(`Shop "${form.name}" provisioned successfully!`, 'success');
                 setCredentials({
                     name: form.name,
-                    admin_email: form.admin_email,
-                    admin_password: form.admin_password,
+                    admin_email: data.data?.admin_email || form.admin_email,
+                    admin_password: data.data?.admin_password || form.admin_password,
+                    cashier_email: data.data?.cashier_email || `cashier@${form.identifier}.com`,
+                    cashier_password: data.data?.cashier_password || form.admin_password,
+                    kitchen_email: data.data?.kitchen_email || `kitchen@${form.identifier}.com`,
+                    kitchen_password: data.data?.kitchen_password || form.admin_password,
                     login_url: window.location.origin + '/login'
                 });
             }
@@ -582,8 +586,21 @@ const CreateShopPage = () => {
             </form>
 
             {credentials && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl">
-                    <div className="bg-slate-900 border border-white/10 rounded-[3.5rem] w-full max-w-xl p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-500 relative overflow-hidden">
+                <div 
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl cursor-pointer"
+                    onClick={() => setCredentials(null)}
+                >
+                    <div 
+                        className="bg-slate-900 border border-white/10 rounded-[3.5rem] w-full max-w-4xl p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-500 relative overflow-hidden cursor-default"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            onClick={() => setCredentials(null)}
+                            className="absolute top-10 right-10 p-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-slate-400 hover:text-white transition-all backdrop-blur-md group z-50"
+                        >
+                            <X size={20} className="group-hover:rotate-90 transition-transform duration-300" />
+                        </button>
+                        
                         <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/5 blur-[80px] rounded-full -mr-32 -mt-32" />
                         
                         <div className="relative flex items-center gap-6 mb-10">
@@ -592,45 +609,102 @@ const CreateShopPage = () => {
                             </div>
                             <div>
                                 <h3 className="text-3xl font-black text-white tracking-tight">Instance Active</h3>
-                                <p className="text-slate-400 font-medium text-lg mt-1">Credentials generated successfully.</p>
+                                <p className="text-slate-400 font-medium text-lg mt-1">Credentials generated successfully for "{credentials.name}".</p>
                             </div>
                         </div>
 
-                        <div className="space-y-6 relative z-10 bg-slate-950/50 p-8 rounded-3xl border border-white/5">
-                            <div className="space-y-1">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shop Name</p>
-                                <p className="text-lg font-black text-white">{credentials.name}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+                            {/* Administrator Card */}
+                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-indigo-500/20 flex flex-col justify-between">
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-indigo-500/10 text-indigo-400 rounded-xl flex items-center justify-center border border-indigo-500/20">
+                                            <ShieldCheck size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Role</p>
+                                            <p className="text-sm font-black text-white mt-0.5">Admin</p>
+                                        </div>
+                                    </div>
+                                    <hr className="border-white/5" />
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Username / Email</p>
+                                        <p className="text-sm font-bold text-white select-all break-all">{credentials.admin_email}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Initial Password</p>
+                                        <p className="text-sm font-mono font-black text-indigo-400 select-all">{credentials.admin_password}</p>
+                                    </div>
+                                </div>
                             </div>
-                            <hr className="border-white/5" />
-                            <div className="space-y-1">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner Email (Username)</p>
-                                <p className="text-lg font-black text-white select-all">{credentials.admin_email}</p>
+
+                            {/* Cashier Card */}
+                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-white/5 flex flex-col justify-between">
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20">
+                                            <Smartphone size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Role</p>
+                                            <p className="text-sm font-black text-white mt-0.5">Cashier</p>
+                                        </div>
+                                    </div>
+                                    <hr className="border-white/5" />
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Username / Email</p>
+                                        <p className="text-sm font-bold text-white select-all break-all">{credentials.cashier_email}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Initial Password</p>
+                                        <p className="text-sm font-mono font-black text-emerald-400 select-all">{credentials.cashier_password}</p>
+                                    </div>
+                                </div>
                             </div>
-                            <hr className="border-white/5" />
-                            <div className="space-y-1">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Initial Password</p>
-                                <p className="text-lg font-mono font-black text-indigo-400 select-all">{credentials.admin_password}</p>
+
+                            {/* Kitchen Card */}
+                            <div className="bg-slate-950/50 p-6 rounded-3xl border border-white/5 flex flex-col justify-between">
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-amber-500/10 text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20">
+                                            <Database size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Role</p>
+                                            <p className="text-sm font-black text-white mt-0.5">Kitchen</p>
+                                        </div>
+                                    </div>
+                                    <hr className="border-white/5" />
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Username / Email</p>
+                                        <p className="text-sm font-bold text-white select-all break-all">{credentials.kitchen_email}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Initial Password</p>
+                                        <p className="text-sm font-mono font-black text-amber-400 select-all">{credentials.kitchen_password}</p>
+                                    </div>
+                                </div>
                             </div>
-                            <hr className="border-white/5" />
-                            <div className="space-y-1">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Login URL</p>
-                                <a href={credentials.login_url} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-slate-400 hover:text-white transition-colors underline break-all">
-                                    {credentials.login_url}
-                                </a>
-                            </div>
+                        </div>
+
+                        <div className="mt-6 relative z-10 bg-slate-950/30 p-6 rounded-3xl border border-white/5 space-y-2">
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Universal Login URL</p>
+                            <a href={credentials.login_url} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-slate-400 hover:text-white transition-colors underline break-all">
+                                {credentials.login_url}
+                            </a>
                         </div>
 
                         <div className="flex gap-6 pt-10">
                             <button 
                                 type="button"
                                 onClick={async () => {
-                                    const text = `Shop: ${credentials.name}\nUsername/Email: ${credentials.admin_email}\nPassword: ${credentials.admin_password}\nLogin URL: ${credentials.login_url}`;
+                                    const text = `Shop: ${credentials.name}\n\n--- ADMIN ---\nUsername/Email: ${credentials.admin_email}\nPassword: ${credentials.admin_password}\n\n--- CASHIER ---\nUsername/Email: ${credentials.cashier_email}\nPassword: ${credentials.cashier_password}\n\n--- KITCHEN ---\nUsername/Email: ${credentials.kitchen_email}\nPassword: ${credentials.kitchen_password}\n\nLogin URL: ${credentials.login_url}`;
                                     await navigator.clipboard.writeText(text);
-                                    showToast('Copied to clipboard!', 'success');
+                                    showToast('All credentials copied to clipboard!', 'success');
                                 }}
                                 className="flex-1 py-5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-[2rem] font-black uppercase text-xs tracking-widest transition-all border border-white/5"
                             >
-                                Copy Credentials
+                                Copy All Credentials
                             </button>
                             <button 
                                 type="button"

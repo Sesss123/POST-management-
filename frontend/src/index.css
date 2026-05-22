@@ -21,6 +21,17 @@
   body {
     @apply bg-slate-950 text-slate-200 font-sans;
   }
+
+  /* Chrome autofill overrides to preserve premium Obsidian Dark theme */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover, 
+  input:-webkit-autofill:focus, 
+  input:-webkit-autofill:active {
+    -webkit-text-fill-color: #f8fafc !important; /* slate-50 */
+    -webkit-box-shadow: 0 0 0px 1000px #020617 inset !important; /* slate-950 */
+    box-shadow: 0 0 0px 1000px #020617 inset !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
 }
 
 @layer components {

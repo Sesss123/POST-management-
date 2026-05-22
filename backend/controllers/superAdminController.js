@@ -257,10 +257,62 @@ exports.getShopById = async (req, res) => {
         const shop = shops[0];
         shop.effective_subscription_status = subscriptionService.resolveEffectiveSubscriptionStatus(shop);
 
+        // Ensure default staff users exist (Cashier and Kitchen)
+        await ensureDefaultStaffUsers(db, shop.id, shop.slug || shop.identifier, shop.name, shop.temp_password);
+
+        // Retrieve all users for the credentials modal
+        const [users] = await db.query(
+            'SELECT name, email, role, temp_password FROM users WHERE shop_id = ? AND role != "super_admin"',
+            [shop.id]
+        );
+        shop.users = users;
+
         res.json({ success: true, data: shop });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+const ensureDefaultStaffUsers = async (dbOrConn, shopId, identifier, shopName, tempPassword) => {
+    const activeTempPassword = tempPassword || 'password';
+
+    // 1. Check if cashier exists for this shop
+    const [[cashierExists]] = await dbOrConn.query(
+        'SELECT id FROM users WHERE shop_id = ? AND role = "cashier" LIMIT 1',
+        [shopId]
+    );
+
+    if (!cashierExists) {
+        const cashierEmail = `cashier@${identifier}.com`;
+        const [[emailCheck]] = await dbOrConn.query('SELECT id FROM users WHERE email = ? LIMIT 1', [cashierEmail]);
+        if (!emailCheck) {
+            const cashierUuid = generateUuid();
+            const cashierHashedPassword = await bcrypt.hash(activeTempPassword, 10);
+            await dbOrConn.query(
+                'INSERT INTO users (uuid, name, email, password, role, shop_id, status, temp_password) VALUES (?, ?, ?, ?, "cashier", ?, "active", ?)',
+                [cashierUuid, `${shopName} Cashier`, cashierEmail, cashierHashedPassword, shopId, activeTempPassword]
+            );
+        }
+    }
+
+    // 2. Check if kitchen exists for this shop
+    const [[kitchenExists]] = await dbOrConn.query(
+        'SELECT id FROM users WHERE shop_id = ? AND role = "kitchen" LIMIT 1',
+        [shopId]
+    );
+
+    if (!kitchenExists) {
+        const kitchenEmail = `kitchen@${identifier}.com`;
+        const [[emailCheck]] = await dbOrConn.query('SELECT id FROM users WHERE email = ? LIMIT 1', [kitchenEmail]);
+        if (!emailCheck) {
+            const kitchenUuid = generateUuid();
+            const kitchenHashedPassword = await bcrypt.hash(activeTempPassword, 10);
+            await dbOrConn.query(
+                'INSERT INTO users (uuid, name, email, password, role, shop_id, status, temp_password) VALUES (?, ?, ?, ?, "kitchen", ?, "active", ?)',
+                [kitchenUuid, `${shopName} Kitchen`, kitchenEmail, kitchenHashedPassword, shopId, activeTempPassword]
+            );
+        }
     }
 };
 
@@ -311,6 +363,9 @@ exports.createShop = async (req, res) => {
             'INSERT INTO users (uuid, name, email, password, role, shop_id, status, temp_password) VALUES (?, ?, ?, ?, "admin", ?, "active", ?)',
             [userUuid, admin_name, admin_email, hashedPassword, shopId, admin_password]
         );
+
+        // Ensure default staff users exist (Cashier and Kitchen)
+        await ensureDefaultStaffUsers(connection, shopId, identifier, name, admin_password);
 
         const defaultSettings = [
             ['shop_name', name],
@@ -363,7 +418,19 @@ exports.createShop = async (req, res) => {
             [req.user.id, 'shop_created', 'shop', shopId, `Provisioned shop: ${name} (${identifier})`, req.ip, req.headers['user-agent']]
         );
 
-        res.status(201).json({ success: true, message: 'Shop provisioned' });
+        res.status(201).json({ 
+            success: true, 
+            message: 'Shop provisioned',
+            data: {
+                shopId: shopId,
+                admin_email: admin_email,
+                admin_password: admin_password,
+                cashier_email: `cashier@${identifier}.com`,
+                cashier_password: admin_password,
+                kitchen_email: `kitchen@${identifier}.com`,
+                kitchen_password: admin_password
+            }
+        });
     } catch (error) {
         await connection.rollback();
         console.error(error);
@@ -466,6 +533,76 @@ exports.updateShop = async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+exports.deleteShop = async (req, res) => {
+    const shopId = req.params.id;
+    const connection = await db.getConnection();
+    try {
+        // Retrieve shop name first for logging/auditing
+        const [[shop]] = await connection.query('SELECT name, slug FROM shops WHERE id = ?', [shopId]);
+        if (!shop) {
+            connection.release();
+            return res.status(404).json({ success: false, message: 'Shop not found' });
+        }
+
+        await connection.beginTransaction();
+
+        // 1. Disable foreign key checks to prevent cascade order failures
+        await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+
+        // 2. Query all tables in the database
+        const [tables] = await connection.query('SHOW TABLES');
+        const dbName = process.env.DB_NAME || 'restoledgerdb';
+        const tableKey = `Tables_in_${dbName}`;
+
+        const excludedTables = [
+            'shops',
+            'subscription_plans',
+            'platform_settings',
+            'broadcast_announcements',
+            'broadcasts'
+        ];
+
+        // 3. For each table, if it contains shop_id, delete records for this shop
+        for (const row of tables) {
+            const tableName = row[tableKey] || Object.values(row)[0];
+            if (excludedTables.includes(tableName)) continue;
+
+            const [columns] = await connection.query(`SHOW COLUMNS FROM \`${tableName}\` LIKE 'shop_id'`);
+            if (columns.length > 0) {
+                await connection.query(`DELETE FROM \`${tableName}\` WHERE shop_id = ?`, [shopId]);
+            }
+        }
+
+        // 4. Delete the shop row itself
+        await connection.query('DELETE FROM shops WHERE id = ?', [shopId]);
+
+        // 5. Re-enable foreign key checks
+        await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+
+        await connection.commit();
+
+        // 6. Record in global audit logs (audit_logs is a platform table but scoped by shop_id,
+        // so we write this entry post-deletion using the global db object)
+        await db.query(
+            'INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [req.user.id, 'shop_deleted', 'shop', shopId, `Purged shop: ${shop.name} (${shop.slug})`, req.ip, req.headers['user-agent']]
+        );
+
+        res.json({ success: true, message: `Shop "${shop.name}" and all associated data have been permanently deleted.` });
+    } catch (error) {
+        try {
+            await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+            await connection.rollback();
+        } catch (rollbackError) {
+            console.error('Rollback failed:', rollbackError);
+        }
+        console.error('[deleteShop]', error);
+        res.status(500).json({ success: false, message: 'Server error occurred during deletion.' });
+    } finally {
+        connection.release();
     }
 };
 

@@ -231,6 +231,7 @@ export const superAdminApi = {
     getShops: () => apiClient.get('/super-admin/shops'),
     createShop: (data) => apiClient.post('/super-admin/shops', data),
     updateShop: (id, data) => apiClient.put(`/super-admin/shops/${id}`, data),
+    deleteShop: (id) => apiClient.delete(`/super-admin/shops/${id}`),
     
     // Subscriptions & Plans
     getSubscriptions: () => apiClient.get('/super-admin/subscriptions'),

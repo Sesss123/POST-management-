@@ -39,7 +39,10 @@ import {
     Fingerprint,
     Lock,
     Key,
-    Copy
+    Copy,
+    Database,
+    Trash2,
+    AlertTriangle
 } from 'lucide-react';
 import api from '../../api/apiClient';
 import { useToast } from '../../components/ui/Feedback';
@@ -97,6 +100,9 @@ const ShopDetailsPage = () => {
     const [isEditingTechnical, setIsEditingTechnical] = useState(false);
     const [techForm, setTechForm] = useState({ email: '', phone: '', address: '' });
     const [isModuleModalOpen, setIsModuleModalOpen] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [confirmName, setConfirmName] = useState('');
+    const [deleteLoading, setDeleteLoading] = useState(false);
 
     const MODULES = [
         { key: 'delivery_hub', label: 'Delivery Hub', icon: Truck, color: 'blue', desc: 'Logistics & Takeaway flow' },
@@ -197,6 +203,31 @@ const ShopDetailsPage = () => {
             showToast('Failed to update technical profile', 'error');
         } finally {
             setAdminLoading(false);
+        }
+    };
+
+    const handleDeleteShop = async (e) => {
+        e.preventDefault();
+        if (confirmName.trim().toLowerCase() !== shop.name.trim().toLowerCase()) {
+            showToast('Shop name does not match confirmation', 'error');
+            return;
+        }
+
+        try {
+            setDeleteLoading(true);
+            const { data } = await api.delete(`/super-admin/shops/${shop.id}`);
+            if (data.success) {
+                showToast(data.message || 'Shop purged successfully', 'success');
+                setShowDeleteModal(false);
+                navigate('/super-admin/shops');
+            } else {
+                showToast(data.message || 'Failed to delete shop', 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast(err.response?.data?.message || 'Server error occurred during deletion', 'error');
+        } finally {
+            setDeleteLoading(false);
         }
     };
 
@@ -316,6 +347,16 @@ const ShopDetailsPage = () => {
                             <DollarSign size={20} />
                             Billing
                         </Link>
+                        <button 
+                            onClick={() => {
+                                setConfirmName('');
+                                setShowDeleteModal(true);
+                            }}
+                            className="flex items-center gap-3 px-8 py-4 bg-rose-600/25 hover:bg-rose-600 border border-rose-500/30 text-rose-400 hover:text-white rounded-[2rem] font-black text-xs tracking-widest uppercase transition-all active:scale-95 shadow-xl hover:shadow-rose-600/20"
+                        >
+                            <Trash2 size={20} />
+                            Purge Node
+                        </button>
                     </div>
                 </div>
             </div>
@@ -725,48 +766,132 @@ const ShopDetailsPage = () => {
             </AppModal>
 
             {/* Premium Credentials Modal */}
-            {showCredentialsModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl">
-                    <div className="bg-slate-900 border border-white/10 rounded-[3.5rem] w-full max-w-xl p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-500 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/5 blur-[80px] rounded-full -mr-32 -mt-32" />
-                        
-                        <div className="relative flex items-center gap-6 mb-10">
-                            <div className="w-20 h-20 bg-purple-500/10 text-purple-400 rounded-[2rem] flex items-center justify-center border border-purple-500/20 shadow-2xl">
-                                <Fingerprint size={36} />
-                            </div>
-                            <div>
-                                <h3 className="text-3xl font-black text-white tracking-tight">Active Credentials</h3>
-                                <p className="text-slate-400 font-medium text-sm mt-1">Primary owner credentials assigned during node provisioning.</p>
-                            </div>
-                        </div>
+            {showCredentialsModal && (() => {
+                const adminUser = shop?.users?.find(u => u.role === 'admin') || {
+                    email: shop?.email || `admin@${shop?.identifier}.com`,
+                    temp_password: shop?.temp_password || 'Not Set'
+                };
+                const cashierUser = shop?.users?.find(u => u.role === 'cashier') || {
+                    email: `cashier@${shop?.identifier}.com`,
+                    temp_password: shop?.temp_password || 'password'
+                };
+                const kitchenUser = shop?.users?.find(u => u.role === 'kitchen') || {
+                    email: `kitchen@${shop?.identifier}.com`,
+                    temp_password: shop?.temp_password || 'password'
+                };
 
-                        <div className="space-y-6 relative z-10">
-                            <div className="space-y-3">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">Owner Username (Email)</label>
-                                <div className="bg-slate-950/50 border border-white/10 rounded-[2rem] p-6 text-white font-mono text-lg flex items-center justify-between select-all group">
-                                    <span>{shop?.email || `admin@${shop?.identifier}.com`}</span>
+                return (
+                    <div 
+                        className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl cursor-pointer"
+                        onClick={() => setShowCredentialsModal(false)}
+                    >
+                        <div 
+                            className="bg-slate-900 border border-white/10 rounded-[3.5rem] w-full max-w-4xl p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-500 relative overflow-hidden cursor-default"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                onClick={() => setShowCredentialsModal(false)}
+                                className="absolute top-10 right-10 p-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-slate-400 hover:text-white transition-all backdrop-blur-md group z-50"
+                            >
+                                <X size={20} className="group-hover:rotate-90 transition-transform duration-300" />
+                            </button>
+                            
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/5 blur-[80px] rounded-full -mr-32 -mt-32" />
+                            
+                            <div className="relative flex items-center gap-6 mb-10">
+                                <div className="w-20 h-20 bg-purple-500/10 text-purple-400 rounded-[2rem] flex items-center justify-center border border-purple-500/20 shadow-2xl">
+                                    <Fingerprint size={36} />
+                                </div>
+                                <div>
+                                    <h3 className="text-3xl font-black text-white tracking-tight">Active Credentials</h3>
+                                    <p className="text-slate-400 font-medium text-sm mt-1">Credentials for default users assigned to "{shop?.name}".</p>
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">Access Password (temp)</label>
-                                <div className="bg-slate-950/50 border border-white/10 rounded-[2rem] p-6 text-indigo-400 font-mono text-lg flex items-center justify-between select-all group">
-                                    <span>{shop?.temp_password || 'Not Set'}</span>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+                                {/* Administrator Card */}
+                                <div className="bg-slate-950/50 p-6 rounded-3xl border border-purple-500/20 flex flex-col justify-between">
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-purple-500/10 text-purple-400 rounded-xl flex items-center justify-center border border-purple-500/20">
+                                                <ShieldCheck size={20} />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Role</p>
+                                                <p className="text-sm font-black text-white mt-0.5">Admin</p>
+                                            </div>
+                                        </div>
+                                        <hr className="border-white/5" />
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Username / Email</p>
+                                            <p className="text-sm font-bold text-white select-all break-all">{adminUser.email}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Access Password</p>
+                                            <p className="text-sm font-mono font-black text-purple-400 select-all">{adminUser.temp_password}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Cashier Card */}
+                                <div className="bg-slate-950/50 p-6 rounded-3xl border border-white/5 flex flex-col justify-between">
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20">
+                                                <Smartphone size={20} />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Role</p>
+                                                <p className="text-sm font-black text-white mt-0.5">Cashier</p>
+                                            </div>
+                                        </div>
+                                        <hr className="border-white/5" />
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Username / Email</p>
+                                            <p className="text-sm font-bold text-white select-all break-all">{cashierUser.email}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Access Password</p>
+                                            <p className="text-sm font-mono font-black text-emerald-400 select-all">{cashierUser.temp_password}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Kitchen Card */}
+                                <div className="bg-slate-950/50 p-6 rounded-3xl border border-white/5 flex flex-col justify-between">
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-amber-500/10 text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20">
+                                                <Database size={20} />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Role</p>
+                                                <p className="text-sm font-black text-white mt-0.5">Kitchen</p>
+                                            </div>
+                                        </div>
+                                        <hr className="border-white/5" />
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Username / Email</p>
+                                            <p className="text-sm font-bold text-white select-all break-all">{kitchenUser.email}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Access Password</p>
+                                            <p className="text-sm font-mono font-black text-amber-400 select-all">{kitchenUser.temp_password}</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">Direct Login URL</label>
-                                <div className="bg-slate-950/50 border border-white/10 rounded-[2rem] p-6 font-mono text-sm flex items-center justify-between">
-                                    <a 
-                                        href={window.location.origin + '/login'} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer" 
-                                        className="text-slate-400 hover:text-white transition-colors underline break-all"
-                                    >
-                                        {window.location.origin + '/login'}
-                                    </a>
-                                </div>
+                            <div className="mt-6 relative z-10 bg-slate-950/30 p-6 rounded-3xl border border-white/5 space-y-2">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Direct Login URL</p>
+                                <a 
+                                    href={window.location.origin + '/login'} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="text-sm font-bold text-slate-400 hover:text-white transition-colors underline break-all"
+                                >
+                                    {window.location.origin + '/login'}
+                                </a>
                             </div>
 
                             <div className="flex gap-6 pt-6">
@@ -780,19 +905,67 @@ const ShopDetailsPage = () => {
                                 <button 
                                     type="button"
                                     onClick={() => {
-                                        const username = shop?.email || `admin@${shop?.identifier}.com`;
-                                        const password = shop?.temp_password || 'Not Set';
-                                        const loginUrl = window.location.origin + '/login';
-                                        const text = `Shop: ${shop?.name}\nUsername/Email: ${username}\nPassword: ${password}\nLogin URL: ${loginUrl}`;
+                                        const text = `Shop: ${shop?.name}\n\n--- ADMIN ---\nUsername/Email: ${adminUser.email}\nPassword: ${adminUser.temp_password}\n\n--- CASHIER ---\nUsername/Email: ${cashierUser.email}\nPassword: ${cashierUser.temp_password}\n\n--- KITCHEN ---\nUsername/Email: ${kitchenUser.email}\nPassword: ${kitchenUser.temp_password}\n\nLogin URL: ${window.location.origin}/login`;
                                         navigator.clipboard.writeText(text);
-                                        showToast('Credentials copied!', 'success');
+                                        showToast('All credentials copied!', 'success');
                                     }}
                                     className="flex-1 py-5 bg-purple-600 hover:bg-purple-500 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest transition-all active:scale-95 shadow-xl shadow-purple-600/20"
                                 >
-                                    Copy Credentials
+                                    Copy All Credentials
                                 </button>
                             </div>
                         </div>
+                    </div>
+                );
+            })()}
+
+            {showDeleteModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
+                    <div className="bg-slate-900 border border-rose-500/20 rounded-[3.5rem] w-full max-w-xl p-12 shadow-[0_0_100px_rgba(244,63,94,0.15)] animate-in zoom-in-95 duration-300 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-rose-600/5 blur-[80px] rounded-full -mr-32 -mt-32" />
+                        <div className="relative flex items-center gap-6 mb-12">
+                            <div className="w-20 h-20 bg-rose-500/10 text-rose-500 rounded-[2rem] flex items-center justify-center border border-rose-500/20 shadow-2xl">
+                                <AlertTriangle size={36} className="text-rose-500" />
+                            </div>
+                            <div>
+                                <h3 className="text-3xl font-black text-white tracking-tight uppercase">Purge Shop Instance</h3>
+                                <p className="text-slate-400 font-medium text-sm mt-1">This operation is irreversible and purges all data.</p>
+                            </div>
+                        </div>
+                        <div className="bg-rose-500/10 border border-rose-500/20 rounded-3xl p-6 mb-8 text-rose-400 text-sm font-bold flex flex-col gap-2">
+                            <p>⚠️ WARNING: Deleting "{shop.name}" will permanently erase all associated users, items, and billing/KOT history.</p>
+                        </div>
+                        <form onSubmit={handleDeleteShop} className="relative space-y-8">
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2 block text-left">
+                                    Type <span className="text-rose-400 select-all font-black">"{shop.name}"</span> to confirm
+                                </label>
+                                <input 
+                                    type="text" required
+                                    placeholder="Exact shop name"
+                                    className="w-full bg-slate-950/50 border border-white/10 rounded-[2rem] py-5 px-8 text-white font-black text-lg focus:border-rose-500 outline-none transition-all"
+                                    value={confirmName}
+                                    onChange={(e) => setConfirmName(e.target.value)}
+                                />
+                            </div>
+                            <div className="flex gap-6 pt-6">
+                                <button 
+                                    type="button"
+                                    onClick={() => setShowDeleteModal(false)}
+                                    className="flex-1 py-5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-[2rem] font-black uppercase text-xs tracking-widest transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="submit"
+                                    disabled={deleteLoading || confirmName.trim().toLowerCase() !== shop.name.trim().toLowerCase()}
+                                    className="flex-1 py-5 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-900/30 disabled:text-rose-500/50 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl transition-all flex items-center justify-center gap-4"
+                                >
+                                    {deleteLoading ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
+                                    Confirm Purge
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

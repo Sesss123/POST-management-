@@ -9,6 +9,7 @@ const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: (req, res) => securitySettingsService.get('security_auth_limit') || 10,
     message: { success: false, message: 'Too many login attempts. Please try again later.' },
+    skip: (req) => process.env.NODE_ENV !== 'production',
     handler: async (req, res, next, options) => {
         // Audit log for repeated suspicious attempts
         try {
